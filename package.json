@@ -1,0 +1,52 @@
+{
+  "name": "dsh-backup",
+  "version": "0.1.0",
+  "description": "Backup DeepSeek Harness user data (~/.dsh) with one command: /backup, automatic scheduled backups, checksums and rotation. 一键备份 DSH 数据，支持定时自动备份。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "backup",
+    "备份",
+    "schedule",
+    "自动备份"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-commands": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-fs": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaoyuyu6420/dsh-backup.git"
+  },
+  "homepage": "https://github.com/xiaoyuyu6420/dsh-backup#readme",
+  "bugs": {
+    "url": "https://github.com/xiaoyuyu6420/dsh-backup/issues"
+  }
+}
