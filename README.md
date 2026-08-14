@@ -19,6 +19,12 @@ auto-backup.
 Every backup writes a sidecar `*.sha256` checksum file. Rotation deletes the
 oldest archives beyond the keep count.
 
+## Security note
+
+Backups contain plaintext credentials (`.credentials.yaml`, `qq-bridge/config.json`).
+Archives are chmod 600 (owner read/write only), but do **not** sync the backup
+directory to untrusted locations, and treat archives as sensitive as your API keys.
+
 ## Install
 
 ```sh
