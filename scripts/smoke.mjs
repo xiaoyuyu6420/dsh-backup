@@ -4,8 +4,10 @@
  * 用 node:fs + node:child_process 模拟 DSH 的 fs / subprocess / commands /
  * tools / timer 服务接口，在临时目录中对 lib/index.js 跑完整场景：
  * 备份 → 列表/校验 → 篡改数据 → 预览/恢复 → 损坏检测 → 恢复拒绝 →
- * 定时持久化续跑 → 轮换。在 Windows 上运行即验证 win32 分支
- * （cmd del/move、tar.exe、crypto 哈希回退）。
+ * 恶意归档拒绝（.. 段 / symlink 逃逸）→ 取消分类 → 定时持久化续跑
+ * （按上次执行时间锚定）→ 轮换 → GitHub 凭据保留 → auto keep 可配。
+ * 在 Windows 上运行即验证 win32 分支
+ * （fs.unlink/rename、tar.exe、crypto 哈希回退）。
  *
  * 用法：node scripts/smoke.mjs
  */
@@ -14,6 +16,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 const IS_WIN = process.platform === 'win32';
 let failures = 0;
@@ -46,8 +49,9 @@ async function mkTmpHome() {
 }
 
 // ---------- DSH 服务桩 ----------
-function makeCtx({ home, dsh }) {
+function makeCtx({ home, dsh, env }) {
   const intervals = [];
+  const timeouts = [];
   const handlers = new Map();
   const typertContribs = [];
   const services = [];
@@ -56,7 +60,6 @@ function makeCtx({ home, dsh }) {
 
   async function resolveExecutable(name) {
     if (IS_WIN) {
-      if (name === 'cmd') return process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
       if (name === 'tar') return 'tar'; // Windows 10+ 自带 System32\tar.exe
       if (name === 'git') return 'git'; // Git Bash / Git for Windows
       throw new Error(`mock: ${name} not found on win32`);
@@ -65,6 +68,17 @@ function makeCtx({ home, dsh }) {
   }
 
   function spawnProc(spec) {
+    if (spec.signal?.aborted) {
+      // 已取消的调用不再启动子进程：立即按被终止分类返回
+      const done = Promise.resolve({ exitCode: null, signal: 'SIGTERM' });
+      return {
+        done,
+        collected: {
+          stdout: { readFrom: () => ({ get text() { return ''; } }) },
+          stderr: { readFrom: () => ({ get text() { return ''; } }) },
+        },
+      };
+    }
     const child = spawn(spec.argv[0], spec.argv.slice(1), { cwd: spec.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
@@ -75,7 +89,7 @@ function makeCtx({ home, dsh }) {
     const done = new Promise((resolve) => {
       child.on('close', (code) => {
         spec.signal?.removeEventListener('abort', onAbort);
-        resolve({ exitCode: code === null ? -1 : code });
+        resolve(code === null ? { exitCode: null, signal: 'SIGTERM' } : { exitCode: code, signal: null });
       });
     });
     return {
@@ -94,6 +108,7 @@ function makeCtx({ home, dsh }) {
           get: (name) => {
             if (name === 'HOME') return { value: home };
             if (name === 'DSH_HOME') return { value: `${home}/.dsh` };
+            if (env && name in env) return { value: env[name] };
             return undefined;
           },
         };
@@ -105,6 +120,10 @@ function makeCtx({ home, dsh }) {
     tools: { register: (t) => { tool = t; } },
     interval: (fn, ms) => {
       intervals.push({ fn, ms });
+      return () => {};
+    },
+    timeout: (fn, ms) => {
+      timeouts.push({ fn, ms });
       return () => {};
     },
     // cordis Context.inject 的桩：typert / webServer 存在时立即激活作用域回调。
@@ -126,7 +145,7 @@ function makeCtx({ home, dsh }) {
       }
     },
   };
-  return { ctx, intervals, typertContribs, services, routes, handler: (raw) => handlers.get('backup')({ rawInput: raw, signal: undefined }), tool: () => tool };
+  return { ctx, intervals, timeouts, typertContribs, services, routes, handler: (raw, signal) => handlers.get('backup')({ rawInput: raw, signal }), tool: () => tool };
 }
 
 async function listArchives(root) {
@@ -147,6 +166,47 @@ async function tarList(root, name) {
     c.on('close', () => resolve(buf));
   });
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * 零依赖 UStar tar 生成器（node:zlib gzip 压缩）：smoke 用它制造真实
+ * tar 工具能读取的恶意归档（.. 段 / symlink 逃逸），restore 的
+ * tar -tvzf 校验必须拒绝。entries: [{ name, type: 'file'|'symlink'|'dir',
+ * content?, linkName? }]。
+ */
+function makeTarGz(entries) {
+  const blocks = [];
+  for (const e of entries) {
+    const isFile = e.type === 'file';
+    const isLink = e.type === 'symlink';
+    const isDir = e.type === 'dir';
+    const content = isFile ? Buffer.from(e.content ?? '', 'utf8') : Buffer.alloc(0);
+    const header = Buffer.alloc(512);
+    const name = Buffer.from(e.name, 'utf8');
+    name.copy(header, 0, 0, Math.min(name.length, 100));
+    header.write('0000644\0', 100, 'ascii');
+    header.write('0000000\0', 108, 'ascii');
+    header.write('0000000\0', 116, 'ascii');
+    header.write(`${content.length.toString(8).padStart(11, '0')}\0`, 124, 'ascii');
+    header.write(`${Math.floor(Date.now() / 1000).toString(8).padStart(11, '0')}\0`, 136, 'ascii');
+    header.fill(0x20, 148, 156); // chksum 占位：8 个空格
+    header.write(isLink ? '2' : isDir ? '5' : '0', 156, 'ascii');
+    if (isLink) {
+      const link = Buffer.from(e.linkName ?? '', 'utf8');
+      link.copy(header, 157, 0, Math.min(link.length, 100));
+    }
+    header.write('ustar\0', 257, 'ascii');
+    header.write('00', 263, 'ascii');
+    let sum = 0;
+    for (const b of header) sum += b;
+    header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii');
+    blocks.push(header);
+    if (content.length) blocks.push(content);
+    const pad = (512 - (content.length % 512)) % 512;
+    if (pad) blocks.push(Buffer.alloc(pad));
+  }
+  blocks.push(Buffer.alloc(512), Buffer.alloc(512)); // 结尾两个零块
+  return gzipSync(Buffer.concat(blocks));
 }
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
@@ -222,8 +282,42 @@ async function main() {
     const evilSha = createHash('sha256').update(evilBytes).digest('hex');
     await fs.writeFile(`${root}/dsh-0000evil.tar.gz.sha256`, `${evilSha}  evil\n`);
     const r6 = await run('restore dsh-0000evil');
-    ok(r6.kind === 'error' && r6.text.includes('之外'), `拒绝归档外条目: ${r6.text.replace(/\n/g, ' ').slice(0, 80)}`);
+    // 根外条目：旧实现报「之外」，统一后的实现并入「不安全条目」——两者都算拒绝
+    ok(r6.kind === 'error' && (r6.text.includes('之外') || r6.text.includes('不安全条目')), `拒绝归档外条目: ${r6.text.replace(/\n/g, ' ').slice(0, 80)}`);
     ok(await fs.readFile(path.join(dsh, 'settings.json'), 'utf8') === '{"a":1}', '现有数据未被 evil 归档触碰');
+
+    console.log('4b) 恶意归档拒绝（.. 段条目 / symlink 逃逸）');
+    const dotdotArchive = makeTarGz([
+      { name: '.dsh/../../evil.txt', type: 'file', content: 'pwned' },
+    ]);
+    await fs.writeFile(`${root}/dsh-0000dotdot.tar.gz`, dotdotArchive);
+    const dotdotSha = createHash('sha256').update(dotdotArchive).digest('hex');
+    await fs.writeFile(`${root}/dsh-0000dotdot.tar.gz.sha256`, `${dotdotSha}  dsh-0000dotdot.tar.gz\n`);
+    const rDot = await run('restore dsh-0000dotdot');
+    ok(rDot.kind === 'error' && rDot.text.includes('不安全条目'), `拒绝 .. 段条目: ${rDot.text.replace(/\n/g, ' ').slice(0, 80)}`);
+    const backslashArchive = makeTarGz([
+      { name: '.dsh/..\\..\\evil.txt', type: 'file', content: 'pwned' },
+    ]);
+    await fs.writeFile(`${root}/dsh-0000backslash.tar.gz`, backslashArchive);
+    const backslashSha = createHash('sha256').update(backslashArchive).digest('hex');
+    await fs.writeFile(`${root}/dsh-0000backslash.tar.gz.sha256`, `${backslashSha}  dsh-0000backslash.tar.gz\n`);
+    const rBackslash = await run('restore dsh-0000backslash');
+    ok(rBackslash.kind === 'error' && rBackslash.text.includes('不安全条目'), `拒绝 ..\\ 反斜杠变体: ${rBackslash.text.replace(/\n/g, ' ').slice(0, 80)}`);
+    const linkArchive = makeTarGz([
+      { name: '.dsh/ln', type: 'symlink', linkName: '/etc/passwd' },
+      { name: '.dsh/ln/x', type: 'file', content: 'x' },
+    ]);
+    await fs.writeFile(`${root}/dsh-0000link.tar.gz`, linkArchive);
+    const linkSha = createHash('sha256').update(linkArchive).digest('hex');
+    await fs.writeFile(`${root}/dsh-0000link.tar.gz.sha256`, `${linkSha}  dsh-0000link.tar.gz\n`);
+    const rLink = await run('restore dsh-0000link');
+    ok(rLink.kind === 'error' && rLink.text.includes('不安全条目'), `拒绝 symlink 逃逸: ${rLink.text.replace(/\n/g, ' ').slice(0, 80)}`);
+
+    console.log('4c) 用户取消分类（不报命令失败）');
+    const ac = new AbortController();
+    ac.abort();
+    const rCancel = await run('', ac.signal);
+    ok(rCancel.kind === 'error' && rCancel.text.includes('已取消') && !rCancel.text.includes('命令失败'), `取消报已取消而非命令失败: ${rCancel.text.replace(/\n/g, ' ').slice(0, 80)}`);
 
     console.log('5) 损坏检测');
     const archives5 = await listArchives(root);
@@ -239,16 +333,24 @@ async function main() {
     const r9 = await run(`restore ${first}`);
     ok(r9.kind === 'success', `按前缀恢复完好的首份归档: ${r9.kind === 'success' ? '' : r9.text}`);
 
-    console.log('6) 定时备份持久化');
+    console.log('6) 定时备份持久化（链式 timeout + 时间戳续跑）');
+    const t0 = mock.timeouts.length; // 基线：只认本次开启注册的调度，不依赖全局末尾
     const r10 = await run('auto 2');
     ok(r10.kind === 'success' && r10.text.includes('持久化'), '开启 auto 2');
     ok(await fs.readFile(`${root}/auto.json`, 'utf8').then((t) => JSON.parse(t).hours === 2), 'auto.json hours=2');
-    ok(mock.intervals.at(-1)?.ms === 2 * 3600 * 1000, 'interval 注册 2 小时');
+    // 开启即立即调度（delay=0，新计划锚点=now）为当前实现行为，非契约承诺
+    ok(mock.timeouts[t0]?.ms === 0, 'auto 2 注册链式调度（新计划锚点=now）');
+
+    // 触发一次自动备份：lastAutoAt 落盘，重启后按上次执行时间推算下次触发（不重置节奏）
+    await mock.timeouts[t0].fn();
+    ok(await fs.readFile(`${root}/auto.json`, 'utf8').then((t) => typeof JSON.parse(t).lastAutoAt === 'string'), '自动备份后持久化 lastAutoAt');
 
     const mock2 = makeCtx({ home, dsh });
     plugin(mock2.ctx, config);
     await new Promise((resolve) => setTimeout(resolve, 50)); // 等待启动恢复的异步读取
-    ok(mock2.intervals.length === 1 && mock2.intervals[0].ms === 2 * 3600 * 1000, '重启后续跑 interval');
+    // mock2 是全新 ctx：重启注册的调度从索引 0 起（基线相对，无全局末尾依赖）
+    const delayMs = mock2.timeouts[0]?.ms;
+    ok(mock2.timeouts.length === 1 && delayMs > 2 * 3600 * 1000 - 5000 && delayMs <= 2 * 3600 * 1000, `重启后按 上次执行+2h 续跑（${Math.round((delayMs ?? 0) / 1000)}s，期望 ≈7200s）`);
     const r11 = await mock2.handler('auto status');
     ok(r11.text.includes('每 2 小时'), `重启后状态正确: ${r11.text}`);
 
@@ -365,6 +467,23 @@ async function main() {
     const bareFiles2 = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
     ok(bareFiles2.filter((f) => f.endsWith('.tar.gz')).length === 1, `轮换删除已同步（bare 仓库剩 1 份归档，实际 ${bareFiles2.filter((f) => f.endsWith('.tar.gz')).length}）`);
 
+    console.log('10b) GitHub 凭据保留（token 写入 .git-credentials，镜像清理不删）');
+    const mockCred = makeCtx({ home, dsh, env: { DSH_BACKUP_GITHUB_TOKEN: 'test-token' } });
+    plugin(mockCred.ctx, { destination: config.destination, githubRepo: ghBare.split(path.sep).join('/') });
+    const rCred = await mockCred.handler('');
+    ok(rCred.kind === 'success', '带 token 的备份成功（https 远端检查通过）');
+    const credsPath = `${root}/.github-sync/.git-credentials`;
+    ok(await fs.readFile(credsPath, 'utf8').then((t) => t.includes('test-token'), () => false), '.git-credentials 存在且含 test-token');
+    if (!IS_WIN) {
+      const credMode = (await fs.stat(credsPath)).mode & 0o777;
+      ok(credMode === 0o600, `.git-credentials 权限 0600（实际 ${credMode.toString(8)}）`);
+    }
+    await fs.writeFile(`${root}/.github-sync/junk-cred-test.txt`, 'junk');
+    await mockCred.handler('github sync');
+    ok(await fs.readFile(credsPath, 'utf8').then((t) => t.includes('test-token'), () => false), '镜像清理后凭据文件仍在（keep 集保留）');
+    const bareFilesCred = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
+    ok(!bareFilesCred.includes('.git-credentials'), 'bare 仓库不含 .git-credentials');
+
     console.log('11) 删除备份 + GitHub 地址运行时修改');
     for (let i = 0; i < 2; i += 1) await mock3.handler('--keep 2');
     const before = (await listArchives(root)).length;
@@ -385,6 +504,22 @@ async function main() {
     const repoClear = await panel2.setGithubRepo('');
     const ghAfterClear = await panel2.githubStatus();
     ok(repoClear.ok === true && ghAfterClear.repoRaw === ghBare.split(path.sep).join('/'), '清除后回退到 config 默认仓库');
+
+    console.log('12) auto keep 可配（config.keep 覆盖自动备份保留数）');
+    const mock6 = makeCtx({ home, dsh });
+    plugin(mock6.ctx, { destination: config.destination, keep: 10 });
+    // 基线：auto 6 注册的调度索引（启动恢复可能已注册 hours=3 的调度）
+    const t6 = mock6.timeouts.length;
+    const rKeepAuto = await mock6.handler('auto 6');
+    ok(rKeepAuto.kind === 'success' && rKeepAuto.text.includes('保留 10 份'), `auto 文案按 config.keep 显示保留数: ${rKeepAuto.text.replace(/\n/g, ' ').slice(0, 60)}`);
+    for (let i = 0; i < 5; i += 1) {
+      const rr = await mock6.handler('--keep 3');
+      if (rr.kind !== 'success') { ok(false, `第 ${i} 次手动备份失败: ${rr.text}`); break; }
+    }
+    ok((await listArchives(root)).length === 3, '手动 --keep 3 轮换后剩 3 份');
+    await mock6.timeouts[t6].fn(); // 触发自动备份：保留数应取 config.keep=10 而非 <24h 默认 3
+    const archivesKeep = await listArchives(root);
+    ok(archivesKeep.length === 4, `auto 备份按 config.keep=10 保留 ${archivesKeep.length} 份（旧逻辑会截到 3）`);
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;

@@ -152,7 +152,7 @@ export async function apply(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-backup: dictionaries');
   ctx.effect(() => installPanelStyles(), 'dsh-backup: stylesheet');
 
-  await ctx.remote.$mount(BACKUP_REMOTE);
+  ctx.effect(await ctx.remote.$mount(BACKUP_REMOTE), 'dsh-backup: remote contribution');
 
   ctx.inject(['remote.backupPanel'], (scope) => {
     const t = scope.locale.bind(NS);

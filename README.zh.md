@@ -12,9 +12,10 @@
 - **`/backup list`** —— 列出已有备份（名称 + 大小）与自动备份状态
 - **`/backup verify [前缀|all]`** —— 校验归档完整性（缺省校验最新一份）
 - **`/backup restore <前缀|latest> [--dry-run]`** —— 从归档恢复 `~/.dsh`
-- **`/backup auto <N小时>|off|status`** —— 每 N 小时自动备份（1~720；<24h 保留 3 份，否则 7 份；状态持久化，重启续跑）
+- **`/backup auto <N小时>|off|status`** —— 每 N 小时自动备份（1~720；保留份数默认 <24h 3 份、否则 7 份，config.keep 可覆盖；状态持久化，重启续跑）
 - **`/backup --keep N`** —— 覆盖轮换保留份数（默认 7）
-- **`/backup github status|sync`** —— GitHub 同步状态 / 立即推送
+- **`/backup github status|sync|repo <地址|off>`** —— GitHub 同步状态 / 立即推送 / 设置同步仓库
+- **`/backup delete|rm <前缀|latest>`** —— 删除指定备份（归档 + 校验边车）
 - **`backup_dsh` 工具** —— 模型可调用同一能力（`mode=backup|list|verify|restore|auto`）
 
 ## GitHub 同步
@@ -64,13 +65,13 @@ credential 文件（不进进程参数）。推送为 `HEAD:main --force-with-le
   name: 'dsh-backup'
   config:
     destination: '~/Backups/dsh'   # 默认 ~/Desktop/dsh-backups
-    keep: 10                       # 默认轮换保留份数
+    keep: 10                       # 手动备份轮换份数（默认 7）；配置后同时作为自动备份保留份数（未配置时 auto 默认 <24h 3 份 / 否则 7 份）
     exclude:                       # 额外的 tar --exclude 模式
       - '*cache*'
     githubRepo: '账号/dsh-backups' # 可选 GitHub 同步（见下文）
 ```
 
-自动备份状态保存在 `<destination>/auto.json`，重启后续跑。
+自动备份状态保存在 `<destination>/auto.json`，重启后按上次自动执行时间推算下次触发（不重置节奏）。
 
 ## 安全说明
 
