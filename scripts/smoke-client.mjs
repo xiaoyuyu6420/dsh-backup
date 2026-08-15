@@ -137,7 +137,7 @@ async function main() {
     const React = require('react');
     const { renderToStaticMarkup } = require('react-dom/server');
     const markup = renderToStaticMarkup(React.createElement(Component, { panel: injected.panel, t: scope.locale.bind('settings.backupPanel') }));
-    ok(markup.includes('dsb-section') && markup.includes('正在读取备份状态'), 'SSR 渲染出标签页骨架（loading 态）');
+    ok(markup.includes('data-dsh-backup') && markup.includes('正在读取备份状态'), 'SSR 渲染出标签页骨架（loading 态）');
   }
 
   console.log(`\n结果: ${checks - failures}/${checks} 通过`);
