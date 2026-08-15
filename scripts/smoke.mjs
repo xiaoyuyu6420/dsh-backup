@@ -348,6 +348,10 @@ async function main() {
     ok(bareFiles.some((f) => f.endsWith('.tar.gz')) && bareFiles.some((f) => f.endsWith('.sha256')), `归档与边车已推送（${bareFiles.length} 个文件）`);
     ok(!bareFiles.includes('.git-credentials'), '凭据文件未被推送');
     ok(await fs.readFile(path.join(syncDir2, '.gitignore'), 'utf8').then((t) => t.includes('.git-credentials')), '.gitignore 排除凭据文件');
+    await fs.writeFile(path.join(syncDir2, 'junk-file.txt'), 'junk');
+    await mock3.handler('github sync');
+    ok(await fs.stat(path.join(syncDir2, 'junk-file.txt')).then(() => false, () => true), '工作树杂物被镜像清理');
+    ok(!(await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD'])).includes('junk-file.txt'), '杂物未进入远端');
     const st10 = JSON.parse(await fs.readFile(path.join(root, 'auto.json'), 'utf8'));
     ok(st10.github && st10.github.lastPush, 'auto.json 记录 github.lastPush');
     const stCmd = await mock3.handler('github status');

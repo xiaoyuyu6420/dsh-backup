@@ -1,6 +1,6 @@
 {
   "name": "dsh-backup",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Backup, restore, download and GitHub-sync DeepSeek Harness user data (~/.dsh): /backup, scheduled auto-backup that survives restarts, sha256 checksums, integrity verify, rotation and a visual Settings panel. Cross-platform (macOS/Linux/Windows). 一键备份与恢复 DSH 数据：定时自动备份、完整性校验、下载与 GitHub 同步，附 Settings 可视面板。",
   "type": "module",
   "main": "lib/index.js",
