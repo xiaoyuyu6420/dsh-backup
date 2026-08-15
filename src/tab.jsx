@@ -28,6 +28,8 @@ export function BackupTab({ panel, t }) {
   const [banner, setBanner] = useState(null);
   const [hoursInput, setHoursInput] = useState('');
   const [pending, setPending] = useState(null);
+  const [repoInput, setRepoInput] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   const reload = () => { setRequest(v => v + 1); };
 
@@ -35,7 +37,13 @@ export function BackupTab({ panel, t }) {
     let current = true;
     setFailed(false);
     void Promise.all([panel.status(), panel.githubStatus()]).then(
-      ([snapshot, gh]) => { if (current) { setSnap(snapshot); setGithub(gh); } },
+      ([snapshot, gh]) => {
+        if (current) {
+          setSnap(snapshot);
+          setGithub(gh);
+          if (gh.repoRaw !== null) setRepoInput(gh.repoRaw);
+        }
+      },
       () => { if (current) { setFailed(true); setSnap(null); } },
     );
     return () => { current = false; };
@@ -58,6 +66,14 @@ export function BackupTab({ panel, t }) {
   const verifyOne = (name) => { void run(`verify:${name}`, () => panel.verify(name)); };
   const setAuto = (hours) => { void run('auto', () => panel.setAuto(hours)).then(reload); };
   const syncNow = () => { void run('github-sync', () => panel.githubSyncNow()).then(reload); };
+  const saveRepo = (value) => {
+    setConfirmDelete(null);
+    void run('github-repo', () => panel.setGithubRepo(value)).then(reload);
+  };
+  const deleteOne = (name) => {
+    setConfirmDelete(null);
+    void run(`delete:${name}`, () => panel.remove(name)).then(reload);
+  };
 
   const previewRestore = (name) => {
     setPending(null);
@@ -157,29 +173,48 @@ export function BackupTab({ panel, t }) {
                   </span>
                 ) : null}
               </h3>
-              {github.repo === null ? (
+              {github.repo === null && repoInput === '' ? (
                 <p className="dsb-status">{t('githubNotConfigured')}</p>
-              ) : (
-                <>
-                  <dl className="dsb-kv">
-                    <dt>{t('githubRepo')}</dt>
-                    <dd>{github.repo}</dd>
-                    <dt>{t('githubLastPush')}</dt>
-                    <dd>{github.lastPush ?? t('none')}</dd>
-                    {github.lastError !== null ? (
-                      <>
-                        <dt>{t('githubError')}</dt>
-                        <dd>{github.lastError}</dd>
-                      </>
-                    ) : null}
-                  </dl>
-                  <div className="dsb-row">
-                    <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={syncNow}>
-                      {busy === 'github-sync' ? t('githubBusy') : t('githubSyncNow')}
-                    </button>
-                  </div>
-                </>
-              )}
+              ) : null}
+              <dl className="dsb-kv">
+                <dt>{t('githubRepo')}</dt>
+                <dd>{github.repo ?? t('none')}</dd>
+                <dt>{t('githubLastPush')}</dt>
+                <dd>{github.lastPush ?? t('none')}</dd>
+                {github.lastError !== null ? (
+                  <>
+                    <dt>{t('githubError')}</dt>
+                    <dd>{github.lastError}</dd>
+                  </>
+                ) : null}
+              </dl>
+              <div className="dsb-row">
+                <label>
+                  {t('githubRepoLabel')}
+                  <input
+                    type="text" placeholder="owner/repo" value={repoInput}
+                    onChange={(e) => setRepoInput(e.target.value)}
+                    style={{ width: '18em' }}
+                  />
+                </label>
+                <button
+                  type="button" className="dsb-btn-secondary"
+                  disabled={busy !== '' || repoInput.trim() === ''}
+                  onClick={() => saveRepo(repoInput.trim())}
+                >
+                  {t('save')}
+                </button>
+                <button
+                  type="button" className="dsb-btn-secondary"
+                  disabled={busy !== '' || repoInput.trim() === ''}
+                  onClick={() => { setRepoInput(''); saveRepo(''); }}
+                >
+                  {t('clear')}
+                </button>
+                <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={syncNow}>
+                  {busy === 'github-sync' ? t('githubBusy') : t('githubSyncNow')}
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -231,6 +266,21 @@ export function BackupTab({ panel, t }) {
                       >
                         {busy === `restore:${b.name}` ? t('busy') : t('restore')}
                       </button>
+                      {confirmDelete === b.name ? (
+                        <button
+                          type="button" className="dsb-btn-danger"
+                          disabled={busy !== ''} onClick={() => deleteOne(b.name)}
+                        >
+                          {busy === `delete:${b.name}` ? t('busy') : t('confirmDelete')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button" className="dsb-btn-danger"
+                          disabled={busy !== ''} onClick={() => setConfirmDelete(b.name)}
+                        >
+                          {t('delete')}
+                        </button>
+                      )}
                     </span>
                   </li>
                 ))}

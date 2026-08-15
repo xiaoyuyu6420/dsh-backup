@@ -45,9 +45,14 @@ export const zh = {
   githubTokenMissing: '未配置（https 远端需要）',
   githubLastPush: '上次推送',
   githubError: '上次错误',
-  githubNotConfigured: '未配置：在 cordis.yml 的 config.githubRepo 设置仓库。',
+  githubNotConfigured: '未配置：在下方填写仓库地址，或在 cordis.yml 的 config.githubRepo 设置。',
   githubSyncNow: '立即同步',
   githubBusy: '同步中…',
+  githubRepoLabel: '仓库地址',
+  save: '保存',
+  clear: '清除',
+  delete: '删除',
+  confirmDelete: '确认删除？',
 };
 
 export const en = {
@@ -93,7 +98,12 @@ export const en = {
   githubTokenMissing: 'Missing (needed for https remotes)',
   githubLastPush: 'Last push',
   githubError: 'Last error',
-  githubNotConfigured: 'Not configured: set config.githubRepo in cordis.yml.',
+  githubNotConfigured: 'Not configured: enter a repository below, or set config.githubRepo in cordis.yml.',
   githubSyncNow: 'Sync now',
   githubBusy: 'Syncing…',
+  githubRepoLabel: 'Repository',
+  save: 'Save',
+  clear: 'Clear',
+  delete: 'Delete',
+  confirmDelete: 'Confirm delete?',
 };

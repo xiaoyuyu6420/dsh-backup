@@ -70,10 +70,10 @@ async function main() {
   ok(dict['settings.backupPanel']?.zh?.tab === '备份' && dict['settings.backupPanel']?.en?.tab === 'Backup', '双语文典已注册');
 
   const contribution = contributions[0];
-  ok(contribution?.package === 'dsh-backup' && contribution.descriptors.length === 7, `Remote 贡献含 ${contribution?.descriptors.length} 个端点`);
+  ok(contribution?.package === 'dsh-backup' && contribution.descriptors.length === 9, `Remote 贡献含 ${contribution?.descriptors.length} 个端点`);
 
   const endpoints = contribution.descriptors.map((d) => `${d.namespace}/${d.method}`);
-  ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow']), `端点与宿主半边一致: ${endpoints.join(', ')}`);
+  ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/remove', 'backupPanel/setGithubRepo']), `端点与宿主半边一致: ${endpoints.join(', ')}`);
 
   console.log('3) strict schema 解析宿主样例负载');
   const samples = {
@@ -86,8 +86,10 @@ async function main() {
     'backupPanel/verify': { ok: false, summary: '❌', results: [{ name: 'dsh-1.tar.gz', ok: false, note: 'sha256 不匹配' }] },
     'backupPanel/restore': { ok: true, dryRun: true, archive: '/x/dsh-1.tar.gz', files: 5, sample: ['.dsh/settings.json'], summary: '5 项' },
     'backupPanel/setAuto': { ok: true, hours: 3, summary: '已开启' },
-    'backupPanel/githubStatus': { repo: 'https://github.com/u/backups.git', tokenSet: true, syncDir: 'C:/x/.github-sync', lastPush: '2026-08-15T10:00:00.000Z', lastError: null },
+    'backupPanel/githubStatus': { repoRaw: 'u/backups', repo: 'https://github.com/u/backups.git', tokenSet: true, syncDir: 'C:/x/.github-sync', lastPush: '2026-08-15T10:00:00.000Z', lastError: null },
     'backupPanel/githubSyncNow': { ok: true, summary: '无变更', pushed: false, tooBig: [] },
+    'backupPanel/remove': { ok: true, summary: '已删除备份: dsh-x.tar.gz' },
+    'backupPanel/setGithubRepo': { ok: true, repo: 'u/backups', summary: '已设为 u/backups' },
   };
   for (const d of contribution.descriptors) {
     const key = `${d.namespace}/${d.method}`;
@@ -112,6 +114,8 @@ async function main() {
       setAuto: async () => ({ ok: true, value: samples['backupPanel/setAuto'] }),
       githubStatus: async () => ({ ok: true, value: samples['backupPanel/githubStatus'] }),
       githubSyncNow: async () => ({ ok: true, value: samples['backupPanel/githubSyncNow'] }),
+      remove: async () => ({ ok: true, value: samples['backupPanel/remove'] }),
+      setGithubRepo: async () => ({ ok: true, value: samples['backupPanel/setGithubRepo'] }),
     };
     const scope = {
       locale: {
@@ -132,7 +136,7 @@ async function main() {
     ok(typeof tab?.component === 'function' || typeof tab === 'function', '标签页组件可渲染');
     const Component = tab?.component ?? tab;
     const injected = tab.inject();
-    ok(typeof injected.panel?.status === 'function' && typeof injected.panel?.restore === 'function' && typeof injected.panel?.githubSyncNow === 'function', '注入面提供 panel API（含 github）');
+    ok(typeof injected.panel?.status === 'function' && typeof injected.panel?.restore === 'function' && typeof injected.panel?.githubSyncNow === 'function' && typeof injected.panel?.remove === 'function' && typeof injected.panel?.setGithubRepo === 'function', '注入面提供 panel API（含 remove/github）');
 
     const React = require('react');
     const { renderToStaticMarkup } = require('react-dom/server');

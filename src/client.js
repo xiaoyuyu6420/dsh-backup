@@ -71,6 +71,7 @@ const setAutoSchema = z.object({
 });
 
 const githubStatusSchema = z.object({
+  repoRaw: z.string().nullable(),
   repo: z.string().nullable(),
   tokenSet: z.boolean(),
   syncDir: z.string(),
@@ -85,10 +86,22 @@ const githubSyncSchema = z.object({
   tooBig: z.array(z.string()),
 });
 
+const removeSchema = z.object({
+  ok: z.boolean(),
+  summary: z.string(),
+});
+
+const setGithubRepoSchema = z.object({
+  ok: z.boolean(),
+  repo: z.string().nullable(),
+  summary: z.string(),
+});
+
 const keepParam = { name: 'keep', wire: 'keep', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#keep', schema: z.number().int().positive().optional() }, acceptsUndefined: true };
 const selectorParam = { name: 'selector', wire: 'selector', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#selector', schema: z.string().optional() }, acceptsUndefined: true };
 const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#dryRun', schema: z.boolean().optional() }, acceptsUndefined: true };
 const hoursParam = { name: 'hours', wire: 'hours', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#hours', schema: z.number().int().min(0).max(720) }, acceptsUndefined: true };
+const repoParam = { name: 'repo', wire: 'repo', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#repo', schema: z.string().optional() }, acceptsUndefined: true };
 
 function strictDescriptor(method, parameters, schema, cancellation) {
   return Object.freeze({
@@ -118,6 +131,8 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('setAuto', [hoursParam], setAutoSchema, false),
     strictDescriptor('githubStatus', [], githubStatusSchema, false),
     strictDescriptor('githubSyncNow', [], githubSyncSchema, true),
+    strictDescriptor('remove', [selectorParam], removeSchema, true),
+    strictDescriptor('setGithubRepo', [repoParam], setGithubRepoSchema, false),
   ]),
 });
 
@@ -150,6 +165,8 @@ export async function apply(ctx) {
       setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
       githubStatus: async () => unwrap(await ns().githubStatus()),
       githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
+      remove: async (selector) => unwrap(await ns().remove(selector)),
+      setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
     };
     scope.slots.inject('settings.plugins.tab', () => scope.slots.register({
       name: 'settings.plugins.tab',

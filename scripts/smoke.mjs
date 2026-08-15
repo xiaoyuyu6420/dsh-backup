@@ -267,7 +267,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow']), `7 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/remove', 'backupPanel/setGithubRepo']), `9 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -364,6 +364,27 @@ async function main() {
     for (let i = 0; i < 3; i += 1) await mock3.handler('--keep 1');
     const bareFiles2 = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
     ok(bareFiles2.filter((f) => f.endsWith('.tar.gz')).length === 1, `轮换删除已同步（bare 仓库剩 1 份归档，实际 ${bareFiles2.filter((f) => f.endsWith('.tar.gz')).length}）`);
+
+    console.log('11) 删除备份 + GitHub 地址运行时修改');
+    for (let i = 0; i < 2; i += 1) await mock3.handler('--keep 2');
+    const before = (await listArchives(root)).length;
+    const del = await panel2.remove(undefined, undefined);
+    ok(del.ok === true && del.summary.includes('已删除'), `面板 remove 成功: ${del.summary}`);
+    ok((await listArchives(root)).length === before - 1, `归档已从磁盘删除（${before - 1} 份剩余）`);
+    const delBad = await panel2.remove('no-such-archive', undefined);
+    ok(delBad.ok === false, '删除不存在的备份被拒');
+    const rmCmd = await mock3.handler('delete latest');
+    ok(rmCmd.kind === 'success' && rmCmd.text.includes('🗑️'), `命令删除: ${rmCmd.text}`);
+    const repoSet = await panel2.setGithubRepo('other-user/some-backups');
+    ok(repoSet.ok === true, 'setGithubRepo 设置成功');
+    const ghAfter = await panel2.githubStatus();
+    ok(ghAfter.repoRaw === 'other-user/some-backups' && ghAfter.repo === 'https://github.com/other-user/some-backups.git', '运行时地址优先并生效');
+    ok(JSON.parse(await fs.readFile(path.join(root, 'auto.json'), 'utf8')).github.repo === 'other-user/some-backups', 'auto.json 持久化运行时地址');
+    const repoBad = await panel2.setGithubRepo('no-slashes-here');
+    ok(repoBad.ok === false, '非法仓库格式被拒');
+    const repoClear = await panel2.setGithubRepo('');
+    const ghAfterClear = await panel2.githubStatus();
+    ok(repoClear.ok === true && ghAfterClear.repoRaw === ghBare.split(path.sep).join('/'), '清除后回退到 config 默认仓库');
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
