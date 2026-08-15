@@ -289,7 +289,7 @@ async function main() {
     }
 
     console.log('9) Web 下载路由');
-    const route = mock.routes.find((r) => r.path === '/backup-download/');
+    const route = mock.routes.find((r) => r.path === '/backup-download');
     ok(route !== undefined && route.kind === 'prefix', '下载路由已注册（prefix）');
     const mkRes = () => {
       const chunks = [];
