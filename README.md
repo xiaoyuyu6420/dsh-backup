@@ -16,16 +16,39 @@ macOS, Linux, and Windows.
 - **`/backup restore <prefix|latest> [--dry-run]`** — restore `~/.dsh` from an archive
 - **`/backup auto <N>|off|status`** — auto-backup every N hours (1–720; keeps 3 copies below 24h, 7 otherwise; persisted across restarts)
 - **`/backup --keep N`** — override the rotation count (default 7)
+- **`/backup github status|sync`** — GitHub sync status / push now
 - **`backup_dsh` tool** — same capability for the model (`mode=backup|list|verify|restore|auto`)
+
+## GitHub sync
+
+With `config.githubRepo` set, every backup (manual, automatic, or panel) is
+also pushed to a Git repository — archives, checksum sidecars, and rotation
+deletions stay in sync:
+
+```yaml
+- id: dsh-backup
+  name: 'dsh-backup'
+  config:
+    githubRepo: 'your-name/dsh-backups'   # owner/repo, full URL, or a local path
+```
+
+Use a **private** repository — archives contain plaintext credentials. For an
+`https` remote, set the token in the environment (`DSH_BACKUP_GITHUB_TOKEN` or
+`GITHUB_TOKEN`); it is only written into the sync worktree's credential file
+(never process args). Push is `HEAD:main --force-with-lease`; archives over
+90 MB are skipped with a notice. State (last push, last error) lives in
+`<destination>/auto.json` and shows in the panel and `/backup github status`.
 
 ## Settings panel (Web)
 
 The same controls have a visual entry: a **Backup** tab inside Settings → Plugins
-(`dsh web`). It shows the destination, auto-backup state, and every archive with
-its size, and offers one-click back-up-now, per-archive verify, and restore with
-a dry-run preview plus explicit confirmation. The tab talks to the host through
-the `backupPanel` Typert Remote namespace (`/api` RPC); the browser bundle ships
-prebuilt in `lib/client.js` — no build step at install time.
+(`dsh web`). It shows the destination, auto-backup state, GitHub sync status, and
+every archive with its size, and offers one-click back-up-now, per-archive
+verify, download, and restore with a dry-run preview plus explicit confirmation.
+Downloads stream from the loopback-only route `GET /backup-download/<name>`.
+The tab talks to the host through the `backupPanel` Typert Remote namespace
+(`/api` RPC); the browser bundle ships prebuilt in `lib/client.js` — no build
+step at install time.
 
 ## How restore works
 
@@ -50,6 +73,7 @@ Plugin `config` in the active cordis profile:
     keep: 10                       # default rotation count
     exclude:                       # extra tar --exclude patterns
       - '*cache*'
+    githubRepo: 'name/dsh-backups' # optional GitHub sync (see below)
 ```
 
 Auto-backup state lives in `<destination>/auto.json` and resumes after restart.

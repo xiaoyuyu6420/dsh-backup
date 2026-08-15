@@ -14,14 +14,35 @@
 - **`/backup restore <前缀|latest> [--dry-run]`** —— 从归档恢复 `~/.dsh`
 - **`/backup auto <N小时>|off|status`** —— 每 N 小时自动备份（1~720；<24h 保留 3 份，否则 7 份；状态持久化，重启续跑）
 - **`/backup --keep N`** —— 覆盖轮换保留份数（默认 7）
+- **`/backup github status|sync`** —— GitHub 同步状态 / 立即推送
 - **`backup_dsh` 工具** —— 模型可调用同一能力（`mode=backup|list|verify|restore|auto`）
+
+## GitHub 同步
+
+配置 `config.githubRepo` 后，每次备份（手动 / 定时 / 面板）都会把归档、校验
+边车与轮换删除一并推送到 Git 仓库：
+
+```yaml
+- id: dsh-backup
+  name: 'dsh-backup'
+  config:
+    githubRepo: '你的账号/dsh-backups'   # owner/repo、完整 URL 或本地路径
+```
+
+**请使用私有仓库**——归档含明文凭据。https 远端需要环境变量 token
+（`DSH_BACKUP_GITHUB_TOKEN` 或 `GITHUB_TOKEN`），token 只写入同步工作树的
+credential 文件（不进进程参数）。推送为 `HEAD:main --force-with-lease`；
+超过 90MB 的归档会跳过并提示。同步状态（上次推送 / 错误）存于
+`<destination>/auto.json`，面板与 `/backup github status` 可见。
 
 ## Settings 可视面板（Web）
 
 同样的能力在 `dsh web` 的 **Settings → Plugins → 备份** 标签页有可视化入口：
-显示备份目录、自动备份状态和每份归档的大小，支持一键立即备份、逐份校验、
-带 dry-run 预览与二次确认的恢复。面板经 `backupPanel` Typert Remote 命名空间
-（`/api` RPC）与宿主通信；浏览器 bundle 预构建在 `lib/client.js`，安装时无需构建。
+显示备份目录、自动备份状态、GitHub 同步状态和每份归档的大小，支持一键立即
+备份、逐份校验、**下载**、带 dry-run 预览与二次确认的恢复。下载走仅限本机的
+`GET /backup-download/<归档名>` 路由。面板经 `backupPanel` Typert Remote
+命名空间（`/api` RPC）与宿主通信；浏览器 bundle 预构建在 `lib/client.js`，
+安装时无需构建。
 
 ## 恢复的工作方式
 
@@ -46,6 +67,7 @@
     keep: 10                       # 默认轮换保留份数
     exclude:                       # 额外的 tar --exclude 模式
       - '*cache*'
+    githubRepo: '账号/dsh-backups' # 可选 GitHub 同步（见下文）
 ```
 
 自动备份状态保存在 `<destination>/auto.json`，重启后续跑。

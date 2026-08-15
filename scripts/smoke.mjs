@@ -51,12 +51,14 @@ function makeCtx({ home, dsh }) {
   const handlers = new Map();
   const typertContribs = [];
   const services = [];
+  const routes = [];
   let tool = null;
 
   async function resolveExecutable(name) {
     if (IS_WIN) {
       if (name === 'cmd') return process.env.ComSpec || 'C:\\Windows\\System32\\cmd.exe';
       if (name === 'tar') return 'tar'; // Windows 10+ 自带 System32\tar.exe
+      if (name === 'git') return 'git'; // Git Bash / Git for Windows
       throw new Error(`mock: ${name} not found on win32`);
     }
     return name; // POSIX 依赖 PATH
@@ -105,18 +107,26 @@ function makeCtx({ home, dsh }) {
       intervals.push({ fn, ms });
       return () => {};
     },
-    // cordis Context.inject 的桩：typert 存在时立即激活作用域回调。
+    // cordis Context.inject 的桩：typert / webServer 存在时立即激活作用域回调。
     inject: (names, callback) => {
-      if (!names.includes('typert')) return;
-      const scope = {
-        typert: { register: (c) => { typertContribs.push(c); return () => {}; } },
-        effect: (fn) => { const dispose = fn(); return () => dispose?.(); },
-        plugin: (Class, opts) => { const instance = new Class(scope, opts); services.push(instance); return instance; },
-      };
-      callback(scope);
+      if (names.includes('typert')) {
+        const scope = {
+          typert: { register: (c) => { typertContribs.push(c); return () => {}; } },
+          effect: (fn) => { const dispose = fn(); return () => dispose?.(); },
+          plugin: (Class, opts) => { const instance = new Class(scope, opts); services.push(instance); return instance; },
+        };
+        callback(scope);
+      }
+      if (names.includes('webServer')) {
+        const scope = {
+          webServer: { register: (route) => { routes.push(route); return () => {}; } },
+          effect: (fn) => { const dispose = fn(); return () => dispose?.(); },
+        };
+        callback(scope);
+      }
     },
   };
-  return { ctx, intervals, typertContribs, services, handler: (raw) => handlers.get('backup')({ rawInput: raw, signal: undefined }), tool: () => tool };
+  return { ctx, intervals, typertContribs, services, routes, handler: (raw) => handlers.get('backup')({ rawInput: raw, signal: undefined }), tool: () => tool };
 }
 
 async function listArchives(root) {
@@ -257,7 +267,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto']), `5 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow']), `7 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -277,6 +287,77 @@ async function main() {
       const bad = await panel.setAuto(999);
       ok(bad.ok === false, '面板 setAuto 越界被拒');
     }
+
+    console.log('9) Web 下载路由');
+    const route = mock.routes.find((r) => r.path === '/backup-download/');
+    ok(route !== undefined && route.kind === 'prefix', '下载路由已注册（prefix）');
+    const mkRes = () => {
+      const chunks = [];
+      return {
+        status: 200, headers: null, done: false, body: null, destroyed: false,
+        writeHead(s, h) { this.status = s; this.headers = h; },
+        write(c) { chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)); return true; },
+        end(b) { if (b !== undefined) chunks.push(Buffer.isBuffer(b) ? b : Buffer.from(b)); this.done = true; this.body = Buffer.concat(chunks); },
+        destroy() { this.destroyed = true; this.done = true; this.body = Buffer.concat(chunks); },
+        // pipe() 需要目标具备事件接口（真实 http.ServerResponse 有）
+        on() {}, once() {}, removeListener() {}, emit() { return false; },
+      };
+    };
+    const waitDone = async (res) => {
+      const t0 = Date.now();
+      while (!res.done && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 20));
+    };
+    if (route) {
+      const target = (await listArchives(root))[0];
+      const good = mkRes();
+      await route.handler({ url: `/backup-download/${target}`, headers: { host: '127.0.0.1:3081' } }, good);
+      await waitDone(good);
+      ok(good.status === 200 && good.body !== null && good.body.length > 0 && String(good.headers['Content-Disposition']).includes(target), `下载 200（${good.body ? good.body.length : 0} 字节，attachment）`);
+      const evil = mkRes();
+      await route.handler({ url: '/backup-download/..%2F..%2Fevil.tar.gz', headers: { host: '127.0.0.1:3081' } }, evil);
+      await waitDone(evil);
+      ok(evil.status === 400, '路径穿越名被拒（400）');
+      const foreign = mkRes();
+      await route.handler({ url: `/backup-download/${target}`, headers: { host: 'evil.example' } }, foreign);
+      await waitDone(foreign);
+      ok(foreign.status === 403, '非 loopback Host 被拒（403）');
+    }
+
+    console.log('10) GitHub 同步（本地 bare 仓库端到端）');
+    const ghBare = path.join(dir, 'gh-bare.git');
+    await new Promise((resolve) => {
+      // -b main：与插件推送的分支一致，便于用 git log/ls-tree 直接检查
+      const c = spawn('git', ['init', '--bare', '-b', 'main', ghBare], { stdio: 'ignore' });
+      c.on('close', resolve);
+    });
+    const gitOut = (args) => new Promise((resolve) => {
+      const c = spawn('git', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      let out = '';
+      c.stdout.on('data', (d) => { out += d; });
+      c.on('close', () => resolve(out.trim()));
+    });
+    const mock3 = makeCtx({ home, dsh });
+    plugin(mock3.ctx, { destination: config.destination, githubRepo: ghBare.split(path.sep).join('/') });
+    const rSync1 = await mock3.handler('');
+    ok(rSync1.kind === 'success' && rSync1.text.includes('备份完成'), '备份成功（githubRepo 已配置）');
+    const syncDir2 = path.join(home, 'Desktop', 'dsh-backups', '.github-sync');
+    ok(await fs.stat(path.join(syncDir2, '.git')).then(() => true, () => false), '同步工作树已初始化');
+    const bareLog = await gitOut(['--git-dir', ghBare, 'log', '--oneline', '-1']);
+    ok(bareLog.includes('backup'), `bare 仓库存在同步提交: ${bareLog}`);
+    const bareFiles = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
+    ok(bareFiles.some((f) => f.endsWith('.tar.gz')) && bareFiles.some((f) => f.endsWith('.sha256')), `归档与边车已推送（${bareFiles.length} 个文件）`);
+    const st10 = JSON.parse(await fs.readFile(path.join(root, 'auto.json'), 'utf8'));
+    ok(st10.github && st10.github.lastPush, 'auto.json 记录 github.lastPush');
+    const stCmd = await mock3.handler('github status');
+    ok(stCmd.kind === 'success' && stCmd.text.includes('gh-bare.git'), 'github status 显示仓库');
+    const panel2 = mock3.services.find((s) => s.name === 'backupPanel');
+    const ghStatus = await panel2.githubStatus();
+    ok(ghStatus.repo && ghStatus.lastPush !== null && ghStatus.syncDir.includes('.github-sync'), '面板 githubStatus 正常');
+    const ghNow = await panel2.githubSyncNow(undefined);
+    ok(ghNow.ok === true && ghNow.pushed === false, '面板 githubSyncNow（无变更）ok');
+    for (let i = 0; i < 3; i += 1) await mock3.handler('--keep 1');
+    const bareFiles2 = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
+    ok(bareFiles2.filter((f) => f.endsWith('.tar.gz')).length === 1, `轮换删除已同步（bare 仓库剩 1 份归档，实际 ${bareFiles2.filter((f) => f.endsWith('.tar.gz')).length}）`);
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;

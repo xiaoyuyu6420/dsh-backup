@@ -70,6 +70,21 @@ const setAutoSchema = z.object({
   summary: z.string(),
 });
 
+const githubStatusSchema = z.object({
+  repo: z.string().nullable(),
+  tokenSet: z.boolean(),
+  syncDir: z.string(),
+  lastPush: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+
+const githubSyncSchema = z.object({
+  ok: z.boolean(),
+  summary: z.string(),
+  pushed: z.boolean(),
+  tooBig: z.array(z.string()),
+});
+
 const keepParam = { name: 'keep', wire: 'keep', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#keep', schema: z.number().int().positive().optional() }, acceptsUndefined: true };
 const selectorParam = { name: 'selector', wire: 'selector', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#selector', schema: z.string().optional() }, acceptsUndefined: true };
 const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#dryRun', schema: z.boolean().optional() }, acceptsUndefined: true };
@@ -101,6 +116,8 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('verify', [selectorParam], verifySchema, true),
     strictDescriptor('restore', [selectorParam, dryRunParam], restoreSchema, true),
     strictDescriptor('setAuto', [hoursParam], setAutoSchema, false),
+    strictDescriptor('githubStatus', [], githubStatusSchema, false),
+    strictDescriptor('githubSyncNow', [], githubSyncSchema, true),
   ]),
 });
 
@@ -131,6 +148,8 @@ export async function apply(ctx) {
       verify: async (selector) => unwrap(await ns().verify(selector)),
       restore: async (selector, dryRun) => unwrap(await ns().restore(selector, dryRun)),
       setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
+      githubStatus: async () => unwrap(await ns().githubStatus()),
+      githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
     };
     scope.slots.inject('settings.plugins.tab', () => scope.slots.register({
       name: 'settings.plugins.tab',

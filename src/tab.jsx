@@ -21,6 +21,7 @@ function mb(size, t) {
 /** 渲染「备份」标签页。 */
 export function BackupTab({ panel, t }) {
   const [snap, setSnap] = useState(null);
+  const [github, setGithub] = useState(null);
   const [failed, setFailed] = useState(false);
   const [request, setRequest] = useState(0);
   const [busy, setBusy] = useState('');
@@ -33,8 +34,8 @@ export function BackupTab({ panel, t }) {
   useEffect(() => {
     let current = true;
     setFailed(false);
-    void Promise.resolve().then(() => panel.status()).then(
-      (snapshot) => { if (current) setSnap(snapshot); },
+    void Promise.all([panel.status(), panel.githubStatus()]).then(
+      ([snapshot, gh]) => { if (current) { setSnap(snapshot); setGithub(gh); } },
       () => { if (current) { setFailed(true); setSnap(null); } },
     );
     return () => { current = false; };
@@ -56,6 +57,7 @@ export function BackupTab({ panel, t }) {
   const verifyAll = () => { void run('verify-all', () => panel.verify('all')).then(reload); };
   const verifyOne = (name) => { void run(`verify:${name}`, () => panel.verify(name)); };
   const setAuto = (hours) => { void run('auto', () => panel.setAuto(hours)).then(reload); };
+  const syncNow = () => { void run('github-sync', () => panel.githubSyncNow()).then(reload); };
 
   const previewRestore = (name) => {
     setPending(null);
@@ -71,6 +73,12 @@ export function BackupTab({ panel, t }) {
     setPending(null);
     void run(`restore:${target.name}`, () => panel.restore(target.name, false)).then(reload);
   };
+
+  const downloadHref = (name) => (
+    typeof window !== 'undefined' && window.location
+      ? `${window.location.origin}/backup-download/${encodeURIComponent(name)}`
+      : ''
+  );
 
   return (
     <div className="dsb-section" data-dsh-backup="" aria-busy={busy !== ''}>
@@ -133,6 +141,37 @@ export function BackupTab({ panel, t }) {
             </div>
           </div>
 
+          {github !== null ? (
+            <div className="dsb-card">
+              <h3 className="dsb-heading">{t('githubTitle')}</h3>
+              {github.repo === null ? (
+                <p className="dsb-status">{t('githubNotConfigured')}</p>
+              ) : (
+                <>
+                  <dl className="dsb-kv">
+                    <dt>{t('githubRepo')}</dt>
+                    <dd>{github.repo}</dd>
+                    <dt>{t('githubToken')}</dt>
+                    <dd>{github.tokenSet ? t('githubTokenSet') : t('githubTokenMissing')}</dd>
+                    <dt>{t('githubLastPush')}</dt>
+                    <dd>{github.lastPush ?? t('none')}</dd>
+                    {github.lastError !== null ? (
+                      <>
+                        <dt>{t('githubError')}</dt>
+                        <dd>{github.lastError}</dd>
+                      </>
+                    ) : null}
+                  </dl>
+                  <div className="dsb-row">
+                    <button type="button" disabled={busy !== ''} onClick={syncNow}>
+                      {busy === 'github-sync' ? t('githubBusy') : t('githubSyncNow')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+
           {banner !== null ? (
             <p className="dsb-banner" role="status" data-ok={banner.ok ? 'true' : 'false'}>{banner.text}</p>
           ) : null}
@@ -171,6 +210,7 @@ export function BackupTab({ panel, t }) {
                       <td>{mb(b.size, t)}</td>
                       <td>
                         <div className="dsb-cell">
+                          <a className="dsb-action" href={downloadHref(b.name)} download={b.name}>{t('download')}</a>
                           <button type="button" disabled={busy !== ''} onClick={() => verifyOne(b.name)}>
                             {busy === `verify:${b.name}` ? t('busy') : t('verify')}
                           </button>

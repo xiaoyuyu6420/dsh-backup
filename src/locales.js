@@ -36,6 +36,17 @@ export const zh = {
   restartHint: '恢复完成后请重启 dsh 使会话与配置生效。',
   sizeUnknown: '—',
   busy: '处理中…',
+  download: '下载',
+  githubTitle: 'GitHub 同步',
+  githubRepo: '仓库',
+  githubToken: 'Token',
+  githubTokenSet: '已配置',
+  githubTokenMissing: '未配置（https 远端需要）',
+  githubLastPush: '上次推送',
+  githubError: '上次错误',
+  githubNotConfigured: '未配置：在 cordis.yml 的 config.githubRepo 设置仓库。',
+  githubSyncNow: '立即同步',
+  githubBusy: '同步中…',
 };
 
 export const en = {
@@ -72,4 +83,15 @@ export const en = {
   restartHint: 'Restart dsh after restore so sessions and settings take effect.',
   sizeUnknown: '—',
   busy: 'Working…',
+  download: 'Download',
+  githubTitle: 'GitHub sync',
+  githubRepo: 'Repository',
+  githubToken: 'Token',
+  githubTokenSet: 'Configured',
+  githubTokenMissing: 'Missing (needed for https remotes)',
+  githubLastPush: 'Last push',
+  githubError: 'Last error',
+  githubNotConfigured: 'Not configured: set config.githubRepo in cordis.yml.',
+  githubSyncNow: 'Sync now',
+  githubBusy: 'Syncing…',
 };

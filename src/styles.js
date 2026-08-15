@@ -102,6 +102,16 @@ const PANEL_CSS = `
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  align-items: center;
+}
+[data-dsh-backup] a.dsb-action {
+  font-size: 0.9em;
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-default);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
 }
 [data-dsh-backup] .dsb-banner {
   margin: 0;
