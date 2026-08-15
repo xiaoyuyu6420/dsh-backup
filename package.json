@@ -1,7 +1,7 @@
 {
   "name": "dsh-backup",
-  "version": "0.1.0",
-  "description": "Backup DeepSeek Harness user data (~/.dsh) with one command: /backup, automatic scheduled backups, checksums and rotation. 一键备份 DSH 数据，支持定时自动备份。",
+  "version": "0.2.0",
+  "description": "Backup and restore DeepSeek Harness user data (~/.dsh) with one command: /backup, scheduled auto-backup that survives restarts, sha256 checksums, integrity verify, and rotation. Cross-platform (macOS/Linux/Windows). 一键备份与恢复 DSH 数据，支持定时自动备份、完整性校验与自动轮换。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -27,8 +27,11 @@
     "deepseek-harness",
     "backup",
     "备份",
+    "restore",
+    "恢复",
     "schedule",
-    "自动备份"
+    "自动备份",
+    "cross-platform"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
