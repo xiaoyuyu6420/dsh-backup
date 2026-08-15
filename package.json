@@ -1,11 +1,12 @@
 {
   "name": "dsh-backup",
-  "version": "0.2.0",
-  "description": "Backup and restore DeepSeek Harness user data (~/.dsh) with one command: /backup, scheduled auto-backup that survives restarts, sha256 checksums, integrity verify, and rotation. Cross-platform (macOS/Linux/Windows). 一键备份与恢复 DSH 数据，支持定时自动备份、完整性校验与自动轮换。",
+  "version": "0.3.0",
+  "description": "Backup and restore DeepSeek Harness user data (~/.dsh) with one command or a Settings panel: /backup, scheduled auto-backup that survives restarts, sha256 checksums, integrity verify, and rotation. Cross-platform (macOS/Linux/Windows). 一键备份与恢复 DSH 数据，支持 Settings 可视面板、定时自动备份、完整性校验与自动轮换。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -19,6 +20,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   },
   "keywords": [
@@ -38,7 +47,14 @@
     "@deepseek-ai/dsh-commands": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-fs": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=20"

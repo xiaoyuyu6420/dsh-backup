@@ -49,6 +49,8 @@ async function mkTmpHome() {
 function makeCtx({ home, dsh }) {
   const intervals = [];
   const handlers = new Map();
+  const typertContribs = [];
+  const services = [];
   let tool = null;
 
   async function resolveExecutable(name) {
@@ -83,38 +85,6 @@ function makeCtx({ home, dsh }) {
     };
   }
 
-  const fsStub = {
-    resolve: async (p) => ({ targetKey: p, displayPath: p }),
-    stat: async (t) => {
-      try {
-        const st = await fs.stat(t.targetKey);
-        return { type: st.isDirectory() ? 'directory' : 'file', size: st.size, version: 1 };
-      } catch {
-        return undefined;
-      }
-    },
-    listDir: async (t) => {
-      const dirents = await fs.readdir(t.targetKey, { withFileTypes: true });
-      const entries = [];
-      for (const d of dirents) {
-        const size = d.isFile() ? (await fs.stat(path.join(t.targetKey, d.name))).size : undefined;
-        entries.push({ name: d.name, type: d.isDirectory() ? 'directory' : 'file', size });
-      }
-      return entries;
-    },
-    readText: async (t) => fs.readFile(t.targetKey, 'utf8'),
-    readBytes: async (t, _signal, maxBytes) => {
-      const buf = await fs.readFile(t.targetKey);
-      if (buf.length > maxBytes) throw new Error(`FS_TOO_LARGE: ${buf.length} > ${maxBytes}`);
-      return buf;
-    },
-    writeText: async (t, content) => {
-      await fs.mkdir(path.dirname(t.targetKey), { recursive: true });
-      await fs.writeFile(t.targetKey, content, 'utf8');
-      return {};
-    },
-  };
-
   const ctx = {
     get: (key) => {
       if (key === 'launchEnvironment') {
@@ -128,7 +98,6 @@ function makeCtx({ home, dsh }) {
       }
       return undefined;
     },
-    fs: fsStub,
     subprocess: { resolveExecutable, spawn: spawnProc },
     commands: { register: (cmd) => handlers.set(cmd.name, cmd.handler) },
     tools: { register: (t) => { tool = t; } },
@@ -136,8 +105,18 @@ function makeCtx({ home, dsh }) {
       intervals.push({ fn, ms });
       return () => {};
     },
+    // cordis Context.inject 的桩：typert 存在时立即激活作用域回调。
+    inject: (names, callback) => {
+      if (!names.includes('typert')) return;
+      const scope = {
+        typert: { register: (c) => { typertContribs.push(c); return () => {}; } },
+        effect: (fn) => { const dispose = fn(); return () => dispose?.(); },
+        plugin: (Class, opts) => { const instance = new Class(scope, opts); services.push(instance); return instance; },
+      };
+      callback(scope);
+    },
   };
-  return { ctx, intervals, handler: (raw) => handlers.get('backup')({ rawInput: raw, signal: undefined }), tool: () => tool };
+  return { ctx, intervals, typertContribs, services, handler: (raw) => handlers.get('backup')({ rawInput: raw, signal: undefined }), tool: () => tool };
 }
 
 async function listArchives(root) {
@@ -164,12 +143,15 @@ const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z
 const REPO = path.resolve(HERE, '..');
 
 async function main() {
-  // 提供 @deepseek-ai/dsh-tools 桩（插件唯一的运行时导入）。
-  const stubDir = path.join(REPO, 'node_modules', '@deepseek-ai', 'dsh-tools');
-  await fs.mkdir(stubDir, { recursive: true });
-  const fixture = path.join(REPO, 'scripts', 'fixtures', 'dsh-tools');
-  await fs.copyFile(path.join(fixture, 'package.json'), path.join(stubDir, 'package.json'));
-  await fs.copyFile(path.join(fixture, 'index.js'), path.join(stubDir, 'index.js'));
+  // 提供 @deepseek-ai/dsh-tools 与 dsh-typert-protocol 桩（插件的运行时导入）。
+  const stubRoot = path.join(REPO, 'node_modules', '@deepseek-ai');
+  for (const pkg of ['dsh-tools', 'dsh-typert-protocol']) {
+    const stubDir = path.join(stubRoot, pkg);
+    await fs.mkdir(stubDir, { recursive: true });
+    const fixture = path.join(REPO, 'scripts', 'fixtures', pkg);
+    await fs.copyFile(path.join(fixture, 'package.json'), path.join(stubDir, 'package.json'));
+    await fs.copyFile(path.join(fixture, 'index.js'), path.join(stubDir, 'index.js'));
+  }
 
   const plugin = (await import(new URL('../lib/index.js', import.meta.url).href)).apply;
 
@@ -270,6 +252,31 @@ async function main() {
     ok(await fs.stat(`${root}/auto.json`).then(() => true, () => false), 'auto.json 未被轮换删除');
     const sidecars = (await fs.readdir(root)).filter((n) => n.endsWith('.sha256'));
     ok(sidecars.length === archives7.length, `边车与归档同数（${sidecars.length}/${archives7.length}）`);
+
+    console.log('8) Settings 面板服务（backupPanel Remote）');
+    const contrib = mock.typertContribs[0];
+    ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
+    const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto']), `5 个端点齐全: ${endpoints.join(', ')}`);
+    ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
+    const panel = mock.services.find((s) => s.name === 'backupPanel');
+    ok(panel !== undefined, 'backupPanel 服务已挂载');
+    if (panel) {
+      const snap = await panel.status();
+      ok(snap.destination.includes('Desktop/dsh-backups') && snap.dshHome.endsWith('/.dsh') && Number.isInteger(snap.keepDefault), `status 快照: dest=${snap.destination}`);
+      ok(Array.isArray(snap.backups) && snap.backups.length === 3 && typeof snap.backups[0].size === 'number', `快照含 ${snap.backups.length} 份备份与大小`);
+      const vb = await panel.backup(undefined, undefined);
+      ok(vb.ok === true && typeof vb.path === 'string' && vb.path.endsWith('.tar.gz'), `面板 backup 成功: ${vb.path.split('/').pop()}`);
+      const vv = await panel.verify('all', undefined);
+      ok(vv.ok === true && vv.results.every((r) => r.ok), `面板 verify all 全部通过（${vv.results.length} 份）`);
+      const vr = await panel.restore(undefined, true, undefined);
+      ok(vr.ok === true && vr.dryRun === true && Number.isInteger(vr.files), `面板 restore dry-run 预览: ${vr.files} 项`);
+      const va0 = await panel.setAuto(0);
+      const va3 = await panel.setAuto(3);
+      ok(va0.ok === true && va3.ok === true && va3.hours === 3 && (await fs.readFile(`${root}/auto.json`, 'utf8')).includes('"hours":3'), '面板 setAuto 0/3 生效并持久化');
+      const bad = await panel.setAuto(999);
+      ok(bad.ok === false, '面板 setAuto 越界被拒');
+    }
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;

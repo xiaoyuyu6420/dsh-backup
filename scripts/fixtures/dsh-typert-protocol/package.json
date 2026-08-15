@@ -1,0 +1,7 @@
+{
+  "name": "@deepseek-ai/dsh-typert-protocol",
+  "version": "0.0.0-smoke-stub",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js" }
+}

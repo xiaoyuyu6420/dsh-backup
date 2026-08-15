@@ -16,6 +16,13 @@
 - **`/backup --keep N`** —— 覆盖轮换保留份数（默认 7）
 - **`backup_dsh` 工具** —— 模型可调用同一能力（`mode=backup|list|verify|restore|auto`）
 
+## Settings 可视面板（Web）
+
+同样的能力在 `dsh web` 的 **Settings → Plugins → 备份** 标签页有可视化入口：
+显示备份目录、自动备份状态和每份归档的大小，支持一键立即备份、逐份校验、
+带 dry-run 预览与二次确认的恢复。面板经 `backupPanel` Typert Remote 命名空间
+（`/api` RPC）与宿主通信；浏览器 bundle 预构建在 `lib/client.js`，安装时无需构建。
+
 ## 恢复的工作方式
 
 恢复安全性是设计出来的：
@@ -49,13 +56,18 @@
 文件在 POSIX 上为 `chmod 600`（Windows 依赖用户目录 ACL），但请**不要**把备份
 目录同步到不受信的位置，并像对待 API key 一样对待备份文件。
 
+存储说明：插件自有数据（归档、校验和、`auto.json`）直接经 `node:fs` 写入，
+与 DSH 自身的会话持久化同一模式——`ctx.fs` 能力是模型面的沙箱 surface，
+不适用于宿主插件的自有存储。
+
 ## 安装
 
 ```sh
 dsh plugin --profile web add dsh-backup
 ```
 
-然后重启 `dsh web`，输入 `/backup` 即可。
+然后重启 `dsh web`（插件发现按进程缓存），输入 `/backup` 或打开
+Settings → Plugins → 备份。
 
 ## 依赖
 
@@ -66,11 +78,14 @@ dsh plugin --profile web add dsh-backup
 
 ## 开发
 
-零依赖、无构建——插件本体就是 `lib/index.js`。运行跨平台冒烟测试
-（真实临时目录 + 模拟的 DSH 服务）：
+运行时零依赖——宿主插件就是 `lib/index.js`。浏览器半边源码在 `src/`，
+打包（zod 内联、React/Cordis 保持 external）产物 `lib/client.js` 提交进仓库，
+git 安装无需构建：
 
 ```sh
-node scripts/smoke.mjs
+node scripts/build-client.mjs   # 改 src/ 后重新打包客户端
+node scripts/smoke.mjs          # 宿主冒烟（真实临时目录 + 模拟 DSH 服务）
+node scripts/smoke-client.mjs   # 客户端 bundle：握手/schema/标签页注册/SSR
 ```
 
 ## 许可证

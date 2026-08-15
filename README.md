@@ -18,6 +18,15 @@ macOS, Linux, and Windows.
 - **`/backup --keep N`** — override the rotation count (default 7)
 - **`backup_dsh` tool** — same capability for the model (`mode=backup|list|verify|restore|auto`)
 
+## Settings panel (Web)
+
+The same controls have a visual entry: a **Backup** tab inside Settings → Plugins
+(`dsh web`). It shows the destination, auto-backup state, and every archive with
+its size, and offers one-click back-up-now, per-archive verify, and restore with
+a dry-run preview plus explicit confirmation. The tab talks to the host through
+the `backupPanel` Typert Remote namespace (`/api` RPC); the browser bundle ships
+prebuilt in `lib/client.js` — no build step at install time.
+
 ## How restore works
 
 Restore is safe by construction:
@@ -52,13 +61,19 @@ Archives and checksum sidecars are chmod 600 on POSIX (Windows relies on
 per-user profile ACLs), but do **not** sync the backup directory to untrusted
 locations, and treat archives as sensitive as your API keys.
 
+Storage note: the plugin writes its own data (archives, checksum sidecars,
+`auto.json`) directly through `node:fs`, the same pattern as DSH's own session
+persistence — the `ctx.fs` capability is the model-facing sandboxed surface and
+does not apply to host-owned storage.
+
 ## Install
 
 ```sh
 dsh plugin --profile web add dsh-backup
 ```
 
-Then restart `dsh web` and run `/backup`.
+Then restart `dsh web` (plugin discovery is cached per process) and run `/backup`,
+or open Settings → Plugins → Backup.
 
 ## Requirements
 
@@ -69,11 +84,14 @@ Then restart `dsh web` and run `/backup`.
 
 ## Development
 
-Zero dependencies, no build step — the plugin is `lib/index.js`. Run the
-cross-platform smoke suite (real temp dir, mocked DSH services):
+Zero runtime dependencies — the host plugin is `lib/index.js`. The browser half
+lives in `src/` and is bundled (zod inlined, React/Cordis external) into
+`lib/client.js`, which is committed so git installs never build:
 
 ```sh
-node scripts/smoke.mjs
+node scripts/build-client.mjs   # rebuild the client bundle after editing src/
+node scripts/smoke.mjs          # host smoke suite (real temp dir, mocked DSH services)
+node scripts/smoke-client.mjs   # client bundle: handshake, schemas, tab registration, SSR
 ```
 
 ## License
