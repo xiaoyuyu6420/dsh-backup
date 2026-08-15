@@ -267,7 +267,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/remove', 'backupPanel/setGithubRepo']), `9 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/deleteBackup', 'backupPanel/setGithubRepo']), `9 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -368,10 +368,10 @@ async function main() {
     console.log('11) 删除备份 + GitHub 地址运行时修改');
     for (let i = 0; i < 2; i += 1) await mock3.handler('--keep 2');
     const before = (await listArchives(root)).length;
-    const del = await panel2.remove(undefined, undefined);
-    ok(del.ok === true && del.summary.includes('已删除'), `面板 remove 成功: ${del.summary}`);
+    const del = await panel2.deleteBackup(undefined, undefined);
+    ok(del.ok === true && del.summary.includes('已删除'), `面板 deleteBackup 成功: ${del.summary}`);
     ok((await listArchives(root)).length === before - 1, `归档已从磁盘删除（${before - 1} 份剩余）`);
-    const delBad = await panel2.remove('no-such-archive', undefined);
+    const delBad = await panel2.deleteBackup('no-such-archive', undefined);
     ok(delBad.ok === false, '删除不存在的备份被拒');
     const rmCmd = await mock3.handler('delete latest');
     ok(rmCmd.kind === 'success' && rmCmd.text.includes('🗑️'), `命令删除: ${rmCmd.text}`);

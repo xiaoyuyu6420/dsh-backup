@@ -72,7 +72,7 @@ export function BackupTab({ panel, t }) {
   };
   const deleteOne = (name) => {
     setConfirmDelete(null);
-    void run(`delete:${name}`, () => panel.remove(name)).then(reload);
+    void run(`delete:${name}`, () => panel.deleteBackup(name)).then(reload);
   };
 
   const previewRestore = (name) => {
