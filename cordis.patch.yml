@@ -1,4 +1,4 @@
 # dsh bundle patch: inserts this plugin into a profile's layer stack.
 - insert:
     - id: dsh-backup
-      name: 'dsh-backup'
+      name: '@xiaoyuyu6420/dsh-backup'
