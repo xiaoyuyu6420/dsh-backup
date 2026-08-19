@@ -93,8 +93,14 @@ does not apply to host-owned storage.
 ## Install
 
 ```sh
-dsh plugin --profile web add dsh-backup
+dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
+# or from git:
+dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
+
+> ⚠️ The npm package name is the **scoped** `@xiaoyuyu6420/dsh-backup`. The
+> unscoped `dsh-backup` on npm is an unrelated third-party package — don't
+> install it.
 
 Then restart `dsh web` (plugin discovery is cached per process) and run `/backup`,
 or open Settings → Plugins → Backup.
@@ -117,6 +123,15 @@ node scripts/build-client.mjs   # rebuild the client bundle after editing src/
 node scripts/smoke.mjs          # host smoke suite (real temp dir, mocked DSH services)
 node scripts/smoke-client.mjs   # client bundle: handshake, schemas, tab registration, SSR
 ```
+
+## Acknowledgements
+
+- [@beastrobin](https://github.com/beastrobin) — the reserved-method-name root
+  cause analysis in #1 that directly led to the v0.5.1 fix
+- [@mlosun](https://github.com/mlosun) — the thorough reproduction and root
+  cause report in #2
+- [@Choi-Peng](https://github.com/Choi-Peng) — triage help pointing affected
+  users to the fix in #5
 
 ## License
 
