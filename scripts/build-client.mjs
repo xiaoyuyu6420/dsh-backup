@@ -12,7 +12,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const PLUGIN_ID = 'dsh-backup';
+// 从 package.json 动态读取包名，作为 client bundle 握手 id——与 host plugin 的
+// 包名一致即可被 dsh web 关联。fork 改名后 rebuild 自动跟随，无需改源。
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(await readFile(path.join(__dirname, '..', 'package.json'), 'utf8'));
+const PLUGIN_ID = pkg.name;
 
 /** shell 冻结模块表共享的包（packages/client/web/src/platform.ts）；表外一律内联。 */
 const PLATFORM_EXTERNALS = [
