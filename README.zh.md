@@ -1,6 +1,11 @@
 # dsh-backup
 
 [![dsh-plugin](https://img.shields.io/badge/ecosystem-dsh--plugin-8b5cf6)](https://github.com/topics/dsh-plugin)
+[![npm](https://img.shields.io/npm/v/@xiaoyuyu6420/dsh-backup)](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup)
+[![Publish to npm](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml/badge.svg)](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+[English](README.md) | 简体中文
 
 一键备份**与恢复** DeepSeek Harness 用户数据——`~/.dsh` 下的会话、设置、凭据、
 技能与插件配置（排除可重装的 node_modules），自动生成 sha256 校验和、完整性
@@ -85,11 +90,23 @@ credential 文件（不进进程参数）。推送为 `HEAD:main --force-with-le
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-backup
+dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
+# 或从 git 安装：
+dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-然后重启 `dsh web`（插件发现按进程缓存），输入 `/backup` 或打开
-Settings → Plugins → 备份。
+> ⚠️ npm 包名是 **scoped** 的 `@xiaoyuyu6420/dsh-backup`。npm 上不带 scope
+> 的 `dsh-backup` 是无关的第三方包，请勿安装。
+
+## 快速上手
+
+约 30 秒拿到第一个备份：
+
+1. 安装插件 —— `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup`
+2. 重启 `dsh web` —— 插件发现按进程缓存。
+3. 跑 `/backup` —— 归档连同 sha256 校验文件落到 `~/Desktop/dsh-backups/`。
+
+更喜欢点鼠标？同一套流程在 Settings → Plugins → 备份 标签页。
 
 ## 依赖
 
@@ -97,6 +114,12 @@ Settings → Plugins → 备份。
   bsdtar，Git Bash 的 GNU tar 也可以；校验和优先 `sha256sum`/`shasum`，
   Windows 上回退进程内哈希）
 - DSH `0.1.0-rc.6` 或兼容版本
+
+## 故障排查
+
+- **插件加载失败，报 `client api: method "backupPanel/remove" conflicts with its namespace service`** —— 你装的是 v0.5.0：删除接口的方法名撞上了 DSH 客户端的保留方法名（见 [#2](https://github.com/xiaoyuyu6420/dsh-backup/issues/2)、[#5](https://github.com/xiaoyuyu6420/dsh-backup/issues/5)）。v0.5.1 已将方法改名 `removeEntry` 修复；执行 `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup@latest` 升级后重启 `dsh web` 即可。
+- **Windows 上用哪个 `tar`？** 都可以——Windows 自带 System32 里的 bsdtar，Git Bash 里则是 GNU tar。校验和优先用 `sha256sum`/`shasum`，缺失时自动回退进程内哈希，两种 shell 下 `/backup verify` 都能正常工作。
+- **装错了包** —— npm 包名是 **scoped** 的 `@xiaoyuyu6420/dsh-backup`；不带 scope 的 `dsh-backup` 是无关的第三方包。检查 profile 的插件列表，改用 scoped 名重装。
 
 ## 开发
 
@@ -109,6 +132,12 @@ node scripts/build-client.mjs   # 改 src/ 后重新打包客户端
 node scripts/smoke.mjs          # 宿主冒烟（真实临时目录 + 模拟 DSH 服务）
 node scripts/smoke-client.mjs   # 客户端 bundle：握手/schema/标签页注册/SSR
 ```
+
+## 致谢
+
+- [@beastrobin](https://github.com/beastrobin) —— #1 中对保留方法名的根因分析，直接促成 v0.5.1 修复
+- [@mlosun](https://github.com/mlosun) —— #2 中详尽的复现与根因报告
+- [@Choi-Peng](https://github.com/Choi-Peng) —— #5 中协助把受影响用户指引到修复版本
 
 ## 许可证
 
