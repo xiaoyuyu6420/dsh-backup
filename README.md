@@ -1,6 +1,11 @@
 # dsh-backup
 
 [![dsh-plugin](https://img.shields.io/badge/ecosystem-dsh--plugin-8b5cf6)](https://github.com/topics/dsh-plugin)
+[![npm](https://img.shields.io/npm/v/@xiaoyuyu6420/dsh-backup)](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup)
+[![Publish to npm](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml/badge.svg)](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+English | [简体中文](README.zh.md)
 
 One-command backup **and restore** for DeepSeek Harness user data — sessions,
 settings, credentials, skills, and plugin config under `~/.dsh`, excluding
@@ -103,8 +108,15 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 > unscoped `dsh-backup` on npm is an unrelated third-party package — don't
 > install it.
 
-Then restart `dsh web` (plugin discovery is cached per process) and run `/backup`,
-or open Settings → Plugins → Backup.
+## Quickstart
+
+Your first backup is about 30 seconds away:
+
+1. Install the plugin — `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup`
+2. Restart `dsh web` — plugin discovery is cached per process.
+3. Run `/backup` — the archive and its sha256 sidecar land in `~/Desktop/dsh-backups/`.
+
+Prefer clicking? The same flow lives in Settings → Plugins → Backup.
 
 ## Requirements
 
@@ -112,6 +124,12 @@ or open Settings → Plugins → Backup.
   System32; Git Bash's GNU tar also works — checksums prefer `sha256sum`/`shasum`
   and fall back to an in-process hash on Windows)
 - DSH `0.1.0-rc.6` or compatible
+
+## Troubleshooting
+
+- **Plugin fails to load with `client api: method "backupPanel/remove" conflicts with its namespace service`** — you are on v0.5.0, whose delete-endpoint method name collided with a reserved name in the DSH client (issues [#2](https://github.com/xiaoyuyu6420/dsh-backup/issues/2), [#5](https://github.com/xiaoyuyu6420/dsh-backup/issues/5)). v0.5.1 renamed the method to `removeEntry`; upgrade with `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup@latest` and restart `dsh web`.
+- **Which `tar` on Windows?** Either one works — Windows ships bsdtar in System32, and Git Bash provides GNU tar. Checksums prefer `sha256sum`/`shasum` when present and fall back to an in-process hash, so `/backup verify` works in both shells.
+- **Installed the wrong package** — the npm package is the **scoped** `@xiaoyuyu6420/dsh-backup`; the unscoped `dsh-backup` is an unrelated third-party package. Check your profile's plugin list and reinstall with the scoped name.
 
 ## Development
 
