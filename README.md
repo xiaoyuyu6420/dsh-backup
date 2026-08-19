@@ -14,9 +14,10 @@ macOS, Linux, and Windows.
 - **`/backup list`** — list existing backups (name + size) and auto-backup status
 - **`/backup verify [prefix|all]`** — validate archive checksums (default: the newest)
 - **`/backup restore <prefix|latest> [--dry-run]`** — restore `~/.dsh` from an archive
-- **`/backup auto <N>|off|status`** — auto-backup every N hours (1–720; keeps 3 copies below 24h, 7 otherwise; persisted across restarts)
+- **`/backup auto <N>|off|status`** — auto-backup every N hours (1–720; retains 3 copies below 24h, 7 otherwise, unless `config.keep` overrides; persisted across restarts)
 - **`/backup --keep N`** — override the rotation count (default 7)
-- **`/backup github status|sync`** — GitHub sync status / push now
+- **`/backup github status|sync|repo <address|off>`** — GitHub sync status / push now / set the sync repository
+- **`/backup delete|rm <prefix|latest>`** — delete a backup and its checksum sidecar
 - **`backup_dsh` tool** — same capability for the model (`mode=backup|list|verify|restore|auto`)
 
 ## GitHub sync
@@ -70,13 +71,13 @@ Plugin `config` in the active cordis profile:
   name: 'dsh-backup'
   config:
     destination: '~/Backups/dsh'   # default ~/Desktop/dsh-backups
-    keep: 10                       # default rotation count
+    keep: 10                       # manual rotation count (default 7); when set, also the auto-backup retention — auto keeps 3 copies below 24h, 7 otherwise by default
     exclude:                       # extra tar --exclude patterns
       - '*cache*'
     githubRepo: 'name/dsh-backups' # optional GitHub sync (see below)
 ```
 
-Auto-backup state lives in `<destination>/auto.json` and resumes after restart.
+Auto-backup state lives in `<destination>/auto.json` and resumes after restart — the next run is scheduled from the last auto-backup time, never reset by the restart.
 
 ## Security note
 
