@@ -131,7 +131,7 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('setAuto', [hoursParam], setAutoSchema, false),
     strictDescriptor('githubStatus', [], githubStatusSchema, false),
     strictDescriptor('githubSyncNow', [], githubSyncSchema, true),
-    strictDescriptor('remove', [selectorParam], removeSchema, true),
+    strictDescriptor('removeEntry', [selectorParam], removeSchema, true),
     strictDescriptor('setGithubRepo', [repoParam], setGithubRepoSchema, false),
   ]),
 });
@@ -165,7 +165,7 @@ export async function apply(ctx) {
       setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
       githubStatus: async () => unwrap(await ns().githubStatus()),
       githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
-      remove: async (selector) => unwrap(await ns().remove(selector)),
+      removeEntry: async (selector) => unwrap(await ns().removeEntry(selector)),
       setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
     };
     scope.slots.inject('settings.plugins.tab', () => scope.slots.register({
