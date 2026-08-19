@@ -32,7 +32,8 @@ async function main() {
   globalThis.window = { __ModuleLoader__: { load: (e) => { entry = e; } } };
   const bundle = await readFile(path.join(REPO, 'lib', 'client.js'), 'utf8');
   new Function(bundle)(); // bundle 顶层只声明 var 并调用 window.__ModuleLoader__.load
-  ok(entry !== undefined && entry.id === 'dsh-backup', `bundle 以 id=${entry?.id} 注册`);
+  const pkgName = JSON.parse(await readFile(path.join(REPO, 'package.json'), 'utf8')).name;
+  ok(entry !== undefined && entry.id === pkgName, `bundle 以 id=${entry?.id} 注册`);
 
   const requireShim = (id) => {
     if (id === 'react') return require('react');
@@ -40,7 +41,7 @@ async function main() {
     throw new Error(`意外的外部依赖: ${id}`);
   };
   const plugin = entry.factory(requireShim);
-  ok(plugin.name === 'dsh-backup' && JSON.stringify(plugin.inject) === JSON.stringify(['slots', 'locale', 'remote']), `插件导出面正确: ${plugin.name}`);
+  ok(plugin.name === pkgName && JSON.stringify(plugin.inject) === JSON.stringify(['slots', 'locale', 'remote']), `插件导出面正确: ${plugin.name}`);
 
   console.log('2) apply() 挂载（字典 / Remote 贡献 / 标签页）');
   const dict = {};

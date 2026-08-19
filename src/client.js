@@ -12,12 +12,13 @@ import { z } from 'zod';
 import { BackupTab } from './tab.jsx';
 import { zh, en } from './locales.js';
 import { installPanelStyles } from './styles.js';
+import pkg from '../package.json' with { type: 'json' };
 
 /** 字典命名空间（本插件拥有）。 */
 export const NS = 'settings.backupPanel';
 
-/** 插件名：与包名、cordis.yml 行 id、bundle id 一致。 */
-export const name = 'dsh-backup';
+/** 插件名：取自 package.json name，随包名变（fork 改名自动跟随）。 */
+export const name = pkg.name;
 
 /** 标签页读取的服务；`remote.backupPanel` 随本插件挂载贡献后出现。 */
 export const inject = ['slots', 'locale', 'remote'];
@@ -148,11 +149,32 @@ function unwrap(result) {
  * 浏览器插件主体：字典、样式表、Remote 贡献挂载、Settings 标签页注册。
  * @param ctx - 客户端根上下文。
  */
-export async function apply(ctx) {
+export function apply(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-backup: dictionaries');
   ctx.effect(() => installPanelStyles(), 'dsh-backup: stylesheet');
 
-  ctx.effect(await ctx.remote.$mount(BACKUP_REMOTE), 'dsh-backup: remote contribution');
+  // apply 必须保持同步：宿主 Cordis 会卸载 async apply 里 await 之后注册的
+  // ctx.effect（$mount 的 namespace 随即清空，tab 注册被级联销毁）。因此
+  // $mount 在这里同步注册的 effect 工厂内部异步完成，失败落 console.error；
+  // ctx.inject 与宿主插件一样留在同步帧。
+  ctx.effect(() => {
+    let mounted = null;
+    let pending = true;
+    let unloaded = false;
+    void (async () => {
+      try {
+        mounted = await ctx.remote.$mount(BACKUP_REMOTE);
+      } catch (error) {
+        console.error('dsh-backup: backupPanel mount failed:', error);
+      }
+      pending = false;
+      if (unloaded) void mounted?.();
+    })();
+    return () => {
+      unloaded = true;
+      if (!pending) void mounted?.();
+    };
+  }, 'dsh-backup: remote contribution');
 
   ctx.inject(['remote.backupPanel'], (scope) => {
     const t = scope.locale.bind(NS);
