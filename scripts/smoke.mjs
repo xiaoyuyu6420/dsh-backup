@@ -151,7 +151,8 @@ function makeCtx({ home, dsh, env }) {
 async function listArchives(root) {
   try {
     const names = await fs.readdir(root);
-    return names.filter((n) => n.startsWith('dsh-') && n.endsWith('.tar.gz')).sort().reverse();
+    // 与插件 listBackups 一致：排除恢复前快照（dsh-pre-restore-*），只数用户可见备份
+    return names.filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-pre-restore-') && n.endsWith('.tar.gz')).sort().reverse();
   } catch {
     return [];
   }
@@ -320,8 +321,10 @@ async function main() {
     ok(rCancel.kind === 'error' && rCancel.text.includes('已取消') && !rCancel.text.includes('命令失败'), `取消报已取消而非命令失败: ${rCancel.text.replace(/\n/g, ' ').slice(0, 80)}`);
 
     console.log('5) 损坏检测');
+    // 再建一份用户可见备份，使「最新」与「首份」区分开（pre-restore 快照已排除在 listArchives 外）
+    await run('');
     const archives5 = await listArchives(root);
-    const newest = archives5.find((n) => !n.includes('evil')); // 恢复过程生成的快照
+    const newest = archives5[0]; // 最新用户可见备份
     const fh = await fs.open(`${root}/${newest}`, 'r+');
     const stat = await fh.stat();
     await fh.write(Buffer.from('X'), 0, 1, Math.max(0, Math.floor(stat.size / 2)));
@@ -329,7 +332,7 @@ async function main() {
     const r7 = await run('verify all');
     ok(r7.kind === 'error' && r7.text.includes('❌'), `损坏被检出: ${r7.text.replace(/\n/g, ' | ').slice(0, 100)}`);
     const r8 = await run('restore latest');
-    ok(r8.kind === 'error' && r8.text.includes('校验未通过'), '恢复损坏归档被拒绝');
+    ok(r8.kind === 'error' && r8.text.includes('校验未通过'), '恢复损坏归档被拒绝（latest=损坏的最新份）');
     const r9 = await run(`restore ${first}`);
     ok(r9.kind === 'success', `按前缀恢复完好的首份归档: ${r9.kind === 'success' ? '' : r9.text}`);
 
@@ -362,7 +365,7 @@ async function main() {
     const archives7 = await listArchives(root);
     ok(archives7.length === 3, `轮换后剩 3 份（实际 ${archives7.length}）`);
     ok(await fs.stat(`${root}/auto.json`).then(() => true, () => false), 'auto.json 未被轮换删除');
-    const sidecars = (await fs.readdir(root)).filter((n) => n.endsWith('.sha256'));
+    const sidecars = (await fs.readdir(root)).filter((n) => n.endsWith('.sha256') && !n.startsWith('dsh-pre-restore-'));
     ok(sidecars.length === archives7.length, `边车与归档同数（${sidecars.length}/${archives7.length}）`);
 
     console.log('8) Settings 面板服务（backupPanel Remote）');
@@ -520,6 +523,101 @@ async function main() {
     await mock6.timeouts[t6].fn(); // 触发自动备份：保留数应取 config.keep=10 而非 <24h 默认 3
     const archivesKeep = await listArchives(root);
     ok(archivesKeep.length === 4, `auto 备份按 config.keep=10 保留 ${archivesKeep.length} 份（旧逻辑会截到 3）`);
+
+    console.log('13) F1 — GitHub token 嵌入 URL 不泄露');
+    {
+      const mockT = makeCtx({ home, dsh });
+      plugin(mockT.ctx, config);
+      const panelT = mockT.services[0]?.panel ?? null;
+      const runT = mockT.handler;
+      const secret = 'ghp_SECRETOKEN_0123456789';
+      const repoUrl = `https://x-access-token:${secret}@github.com/me/private-backups.git`;
+      // 命令路径
+      const setC = await runT(`github repo ${repoUrl}`);
+      ok(setC.kind === 'success' && !setC.text.includes(secret), `命令回显不含 token: ${setC.text.replace(/\n/g, ' ').slice(0, 60)}`);
+      const autoC = JSON.parse(await fs.readFile(`${root}/auto.json`, 'utf8'));
+      ok(typeof autoC.github.repo === 'string' && !autoC.github.repo.includes(secret), `auto.json 不含 token（${autoC.github.repo}）`);
+      const stC = await runT('github status');
+      ok(stC.kind === 'success' && !stC.text.includes(secret), `/backup github status 不回显 token`);
+      ok(autoC.github.repo === 'https://github.com/me/private-backups.git', `repo 已剥离 userinfo（${autoC.github.repo}）`);
+      // 面板路径 + repoRaw 不泄露
+      if (panelT) {
+        const setP = await panelT.setGithubRepo(repoUrl);
+        ok(setP.ok === true && !setP.summary.includes(secret) && !setP.repo.includes(secret), `面板 setGithubRepo 不回显 token`);
+        const stP = await panelT.githubStatus();
+        ok(typeof stP.repoRaw === 'string' && !stP.repoRaw.includes(secret), `面板 repoRaw 不含 token（${stP.repoRaw}）`);
+      }
+      // 非法/无 userinfo 输入不被 strip 破坏
+      const setOwner = await runT('github repo me/backups');
+      ok(setOwner.kind === 'success' && setOwner.text.includes('me/backups'), 'owner/repo 不受 strip 影响');
+      // ssh://git@ 不被 strip（保留 git 用户名，避免破坏 SSH 同步）
+      const setSsh = await runT('github repo ssh://git@github.com/me/backups.git');
+      ok(setSsh.kind === 'success' && setSsh.text.includes('git@github.com'), `ssh://git@ 保持原样（${setSsh.text.replace(/\n/g, ' ').slice(0, 50)}）`);
+      await runT('github repo off');
+      // F4：cordis.yml config.githubRepo 内嵌 token 时，面板 repoRaw 回退到 config 也须 strip
+      const cfgSecret = 'ghp_CFGTOKEN_9876543210';
+      const mockCfg = makeCtx({ home, dsh });
+      plugin(mockCfg.ctx, { destination: config.destination, githubRepo: `https://x-access-token:${cfgSecret}@github.com/me/cfg-backups.git` });
+      const panelCfg = mockCfg.services[0]?.panel ?? null;
+      if (panelCfg) {
+        const stCfg = await panelCfg.githubStatus();
+        ok(typeof stCfg.repoRaw === 'string' && !stCfg.repoRaw.includes(cfgSecret), `config.githubRepo 回退的 repoRaw 不含 token（${stCfg.repoRaw}）`);
+        ok(stCfg.repo === 'https://github.com/me/cfg-backups.git', `config 回退的 canonical repo 已剥离（${stCfg.repo}）`);
+      }
+    }
+
+    console.log('14) F2 — lastAutoAt 未来日期被拒（不静默失效）');
+    {
+      // 写入未来日期 lastAutoAt（auto 已开启 hours=2 的场景下注入）
+      const future = '2525-01-01T00:00:00.000Z';
+      await fs.writeFile(`${root}/auto.json`, JSON.stringify({ hours: 2, lastAutoAt: future, github: {} }));
+      const mockF2 = makeCtx({ home, dsh });
+      plugin(mockF2.ctx, config);
+      await new Promise((r) => setTimeout(r, 50));
+      // 未来日期必须被拒 → 视为无锚点 → 从 now 起算，delay 应在 0 ~ 2h 之间，而非 500 年
+      const delayMs = mockF2.timeouts[0]?.ms ?? -1;
+      ok(delayMs >= 0 && delayMs <= 2 * 3600 * 1000, `未来日期被拒，delay 合理（${Math.round((delayMs) / 1000)}s，期望 ≤7200s）`);
+      const stF = await mockF2.handler('auto status');
+      ok(stF.text.includes('每 2 小时'), `auto 状态正常: ${stF.text.replace(/\n/g, ' ').slice(0, 60)}`);
+      // 损坏的旧 auto.json（合法过去日期）仍能续跑
+      const past = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
+      await fs.writeFile(`${root}/auto.json`, JSON.stringify({ hours: 2, lastAutoAt: past, github: {} }));
+      const mockF3 = makeCtx({ home, dsh });
+      plugin(mockF3.ctx, config);
+      await new Promise((r) => setTimeout(r, 50));
+      const delayPast = mockF3.timeouts[0]?.ms ?? -1;
+      ok(delayPast >= 0 && delayPast <= 2 * 3600 * 1000, `过去合法 lastAutoAt 触发 catch-up（${Math.round(delayPast / 1000)}s）`);
+    }
+
+    console.log('15) F3 — 恢复前快照隔离（不进 list / latest 不误选 / 旧快照清理）');
+    {
+      const mockR = makeCtx({ home, dsh });
+      plugin(mockR.ctx, config);
+      const runR = mockR.handler;
+      const beforeList = (await listArchives(root)).length;
+      // 造一份干净备份用于恢复
+      await runR('');
+      const goodList = await listArchives(root);
+      const good = goodList[0];
+      await fs.writeFile(path.join(dsh, 'marker-f3.txt'), 'before-restore');
+      // 实恢复（会生成 dsh-pre-restore-* 快照）
+      const rR = await runR(`restore ${good}`);
+      ok(rR.kind === 'success', `恢复成功（用于触发 pre-restore 快照）`);
+      // (a) /backup list 不含 dsh-pre-restore-
+      const listOut = await runR('list');
+      ok(!listOut.text.includes('dsh-pre-restore-'), `/backup list 不显示 pre-restore 快照`);
+      // (b) 磁盘上确实存在 pre-restore 快照（证明快照仍被创建，只是隔离）
+      const diskAll = (await fs.readdir(root)).filter((n) => n.startsWith('dsh-pre-restore-') && n.endsWith('.tar.gz'));
+      ok(diskAll.length === 1, `磁盘有 1 份 pre-restore 快照（实际 ${diskAll.length}）`);
+      // (c) pre-restore 快照不在 listArchives → latest/前缀选择域不会误选快照
+      const preName = diskAll[0];
+      ok(!(await listArchives(root)).some((n) => n === preName), `pre-restore 快照不在 listArchives（${preName}）`);
+      // (d) 再恢复一次 → 旧 pre-restore 快照被清理（仅留最新一份）
+      await fs.writeFile(path.join(dsh, 'marker-f3b.txt'), 'second-restore');
+      await runR(`restore ${good}`);
+      const diskAll2 = (await fs.readdir(root)).filter((n) => n.startsWith('dsh-pre-restore-') && n.endsWith('.tar.gz'));
+      ok(diskAll2.length === 1, `二次恢复后旧 pre-restore 快照已清理（仅留 1 份，实际 ${diskAll2.length}）`);
+    }
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
