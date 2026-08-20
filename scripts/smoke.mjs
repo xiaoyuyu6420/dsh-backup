@@ -372,7 +372,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo']), `9 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo']), `10 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -617,6 +617,97 @@ async function main() {
       await runR(`restore ${good}`);
       const diskAll2 = (await fs.readdir(root)).filter((n) => n.startsWith('dsh-pre-restore-') && n.endsWith('.tar.gz'));
       ok(diskAll2.length === 1, `二次恢复后旧 pre-restore 快照已清理（仅留 1 份，实际 ${diskAll2.length}）`);
+    }
+
+    console.log('16) 凭据脱敏 + 本机 vault（P0）');
+    {
+      // 干净环境：新 home + 新 root，验证默认脱敏全链路
+      const env16 = await mkTmpHome();
+      try {
+        const mock16 = makeCtx({ home: env16.home, dsh: env16.dsh });
+        plugin(mock16.ctx, { destination: `~/Desktop/dsh-backups` });
+        const r16 = await mock16.handler('');
+        ok(r16.kind === 'success', '脱敏备份成功');
+        const arch16 = (await listArchives(env16.root))[0];
+        const list16 = await tarList(env16.root, arch16);
+        ok(!list16.some((e) => e.includes('.credentials.yaml')), '归档不含 .credentials.yaml（脱敏生效）');
+        const vaultFile = `${env16.root}/vault/.credentials.yaml`;
+        ok(await fs.readFile(vaultFile, 'utf8').then((t) => t === 'api-key: secret', () => false), 'vault 保存明文凭据');
+        const redacted16 = JSON.parse(await fs.readFile(`${env16.root}/${arch16}.redacted.json`, 'utf8'));
+        ok(Array.isArray(redacted16.files) && redacted16.files.includes('.credentials.yaml'), '.redacted.json 边车记录脱敏清单');
+        const meta16 = JSON.parse(await fs.readFile(`${env16.root}/${arch16}.meta.json`, 'utf8'));
+        ok(typeof meta16.home === 'string' && meta16.home === env16.home && typeof meta16.host === 'string', '.meta.json 边车含主机/家目录');
+        // 恢复（本机）：vault 自动还原凭据
+        await fs.rm(env16.dsh, { recursive: true, force: true });
+        const r16r = await mock16.handler('restore latest');
+        ok(r16r.kind === 'success' && r16r.text.includes('vault 已还原'), `恢复后 vault 自动还原: ${r16r.text.split('\n').filter((l) => l.includes('vault')).join(' ')}`);
+        ok(await fs.readFile(`${env16.dsh}/.credentials.yaml`, 'utf8').then((t) => t === 'api-key: secret', () => false), '~/.dsh 凭据从 vault 还原（内容一致）');
+        // 跨机模拟：vault 清空后恢复 → 提示重填而非静默缺失
+        await fs.rm(env16.dsh, { recursive: true, force: true });
+        await fs.rm(`${env16.root}/vault`, { recursive: true, force: true });
+        const r16x = await mock16.handler('restore latest');
+        ok(r16x.kind === 'success' && r16x.text.includes('需重填') && r16x.text.includes('.credentials.yaml'), `跨机恢复提示重填: ${r16x.text.split('\n').filter((l) => l.includes('重填')).join(' ')}`);
+      } finally {
+        await fs.rm(env16.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('17) 恢复预检：跨机 home 提示 + 脱敏/依赖提示（P1）');
+    {
+      const env17 = await mkTmpHome();
+      try {
+        await fs.mkdir(path.join(env17.dsh, 'profiles', 'web'), { recursive: true });
+        await fs.writeFile(path.join(env17.dsh, 'profiles', 'web', 'package.json'), '{"dependencies":{"some-plugin":"^1.0.0"}}');
+        const mockA = makeCtx({ home: env17.home, dsh: env17.dsh });
+        plugin(mockA.ctx, { destination: `~/Desktop/dsh-backups` });
+        await mockA.handler('');
+        // “新机器”：同一备份目录，不同 home —— meta.home 不一致触发跨机提示
+        const homeB = path.join(env17.dir, 'home-b');
+        await fs.mkdir(homeB, { recursive: true });
+        const mockB = makeCtx({ home: homeB, dsh: path.join(homeB, '.dsh') });
+        plugin(mockB.ctx, { destination: env17.root });
+        const pre = await mockB.handler('restore latest --dry-run');
+        ok(pre.kind === 'success' && pre.text.includes('另一台机器'), `跨机 home 提示: ${pre.text.split('\n').filter((l) => l.includes('另一台')).join(' ')}`);
+        ok(pre.text.includes('脱敏'), '预览提示归档已脱敏');
+        ok(pre.text.includes('profile') && pre.text.includes('sync-deps'), '预览提示依赖需重装（--sync-deps）');
+      } finally {
+        await fs.rm(env17.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('18) github pull：新机拉取 + 校验转正（P1）');
+    {
+      const env18 = await mkTmpHome();
+      try {
+        // “旧机器”推送到 bare 远端
+        const ghBare18 = path.join(env18.dir, 'bare.git');
+        await new Promise((resolve) => {
+          const c = spawn('git', ['init', '--bare', '-b', 'main', ghBare18], { stdio: 'ignore' });
+          c.on('close', resolve);
+        });
+        const mockOld = makeCtx({ home: env18.home, dsh: env18.dsh });
+        plugin(mockOld.ctx, { destination: `~/Desktop/dsh-backups`, githubRepo: ghBare18.split(path.sep).join('/') });
+        await mockOld.handler('');
+        const pushed18 = (await listArchives(env18.root)).slice();
+        ok(pushed18.length === 1, '旧机器已推送 1 份');
+        // “新机器”：同 root 但清空本地归档（模拟新机无备份），pull 拉回
+        for (const n of pushed18) {
+          await fs.rm(`${env18.root}/${n}`, { force: true });
+          await fs.rm(`${env18.root}/${n}.sha256`, { force: true });
+          await fs.rm(`${env18.root}/${n}.meta.json`, { force: true });
+          await fs.rm(`${env18.root}/${n}.redacted.json`, { force: true });
+        }
+        const pullR = await mockOld.handler('github pull');
+        ok(pullR.kind === 'success' && pullR.text.includes('已拉取 1 份'), `pull 拉回备份: ${pullR.text.split('\n')[0]}`);
+        ok((await listArchives(env18.root)).length === 1, '拉回的归档已入列表');
+        const ver18 = await mockOld.handler('verify');
+        ok(ver18.kind === 'success', '拉回的归档校验通过');
+        // 重复 pull：本地均已存在
+        const pullR2 = await mockOld.handler('github pull');
+        ok(pullR2.kind === 'success' && pullR2.text.includes('均已存在'), `重复 pull 幂等: ${pullR2.text.split('\n')[0]}`);
+      } finally {
+        await fs.rm(env18.dir, { recursive: true, force: true });
+      }
     }
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
