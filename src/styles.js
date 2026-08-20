@@ -281,4 +281,39 @@ const PANEL_CSS = `
   max-height: 10em;
   overflow: auto;
 }
+
+/* ── 设置输入框 ────────────────────────────────────────── */
+[data-dsh-backup] .dsb-input {
+  width: 100%;
+  max-width: 320px;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  box-sizing: border-box;
+}
+[data-dsh-backup] .dsb-input:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+[data-dsh-backup] .dsb-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  line-height: 1.4;
+}
+[data-dsh-backup] .dsb-status-ok {
+  font-size: 12px;
+  color: var(--dsw-alias-state-success-primary, #2f9e44);
+  line-height: 1.5;
+}
+[data-dsh-backup] .dsb-status-error {
+  font-size: 12px;
+  color: var(--dsw-alias-state-error-primary, #e53e3e);
+  line-height: 1.5;
+}
 `;
