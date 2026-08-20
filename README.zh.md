@@ -7,173 +7,181 @@
 
 [English](README.md) | 简体中文
 
-一键备份**与恢复** DeepSeek Harness 用户数据——`~/.dsh` 下的会话、设置、
-技能与插件配置（排除可重装的 node_modules），自动生成 sha256 校验和、完整性
-校验、自动轮换，定时自动备份状态落盘、重启续跑。**凭据默认脱敏**：明文绝不
-进归档、不进 GitHub 同步，只存本机 vault，恢复时自动还原。跨机恢复有预检
-提示与 `github pull` 一键拉取。支持 macOS / Linux / Windows。
+**dsh-backup 是 DeepSeek Harness（DSH）的备份插件：一条命令备份 `~/.dsh`，一条命令恢复。**
 
-## 场景速查
+你在 DSH 里的会话记录、设置、技能、插件配置，全都在 `~/.dsh` 这一个目录里。误删了、改坏了、换电脑了——只要有过备份，就能找回来。
 
-| 场景 | 怎么做 |
-|---|---|
-| 日常备份 | `/backup`（或 Settings → Plugins → 备份 → 立即备份） |
-| 担心忘备份 | `/backup auto 12` —— 定时备份，重启续跑 |
-| 改坏了配置/装坏了插件 | `/backup restore latest --dry-run` 预览确认后去掉 `--dry-run` |
-| `~/.dsh` 整个没了 | `/backup restore latest` —— 无现有数据时跳过快照直接恢复 |
-| 换新电脑 | 新机装好插件并配置同一 `githubRepo` → `/backup github pull` 拉回备份 → `/backup restore latest --sync-deps` |
-| 怀疑备份损坏 | `/backup verify all` |
-| 归档同步到云端 | `/backup github repo 账号/dsh-backups`（私有仓库），此后每次备份自动推送 |
+它能做到：
 
-## 命令
+- **一键备份、一键恢复** —— 每份备份自动附带校验文件，随时能检查备份有没有损坏；旧备份自动清理，不会越积越多。
+- **定时自动备份** —— 设好间隔就不用管了，重启 DSH 后照常继续。
+- **密码等敏感文件不进备份包** —— 明文只留在本机的 `vault/` 目录里，恢复时自动放回原处（详见下文）。
+- **换电脑不慌** —— 备份可以自动同步到你的 GitHub 私有仓库，新电脑拉回来就能恢复。
+- **有图形界面** —— 不想敲命令，网页设置里有可视化面板。
 
-- **`/backup`** —— 立即备份 `~/.dsh` 到 `~/Desktop/dsh-backups/dsh-<时间戳>.tar.gz`
-- **`/backup list`** —— 列出已有备份（名称 + 大小）与自动备份状态
-- **`/backup verify [前缀|all]`** —— 校验归档完整性（缺省校验最新一份）
-- **`/backup restore <前缀|latest> [--dry-run] [--sync-deps]`** —— 从归档恢复 `~/.dsh`（`--sync-deps` 恢复后对各 profile 重装插件依赖）
-- **`/backup auto <N小时>|off|status`** —— 每 N 小时自动备份（1~720；保留份数默认 <24h 3 份、否则 7 份，config.keep 可覆盖；状态持久化，重启续跑）
-- **`/backup --keep N`** —— 覆盖轮换保留份数（默认 7）
-- **`/backup github status|sync|pull [--restore <前缀|latest>]|repo <地址|off>`** —— 同步状态 / 立即推送 / 从仓库拉取备份到本地 / 设置同步仓库
-- **`/backup delete|rm <前缀|latest>`** —— 删除指定备份（归档 + 全部边车）
-- **`backup_dsh` 工具** —— 模型可调用同一能力（`mode=backup|list|verify|restore|auto`，restore 支持 `syncDeps`）
-
-## 凭据脱敏与本机 vault
-
-凭据文件（默认 `.credentials.yaml`、`.env`、`qq-bridge/config.json`，
-`config.redact` 可增删）**不进归档**：
-
-- 备份时，敏感文件的明文副本镜像到备份目录下的 `vault/`（POSIX 上目录 700、
-  文件 600），归档与 GitHub 同步只含脱敏后的数据。
-- 本机恢复时，凭据自动从 vault 拷回 `~/.dsh`，完整还原。
-- 跨机恢复（新机没有 vault）时，恢复报告会列出缺失的凭据文件清单，提示重填。
-- 归档附带的 `.redacted.json`（脱敏清单）与 `.meta.json`（主机/家目录/时间）
-  边车随归档走，恢复预检据此提示跨机路径风险与需重填的凭据。
-- `config.redact: false` 可回到 v0.6.x 的明文行为（不推荐）。
-
-## GitHub 同步
-
-配置 `config.githubRepo` 后，每次备份（手动 / 定时 / 面板）都会把归档、校验
-边车与轮换删除一并推送到 Git 仓库：
-
-```yaml
-- id: dsh-backup
-  name: 'dsh-backup'
-  config:
-    githubRepo: '你的账号/dsh-backups'   # owner/repo、完整 URL 或本地路径
-```
-
-**请使用私有仓库**——归档虽已脱敏，但仍含会话内容等敏感数据。https 远端需要
-环境变量 token（`DSH_BACKUP_GITHUB_TOKEN` 或 `GITHUB_TOKEN`），token 只写入
-同步工作树的 credential 文件（不进进程参数）。推送为 `HEAD:main
---force-with-lease`；超过 90MB 的归档会跳过并提示。同步状态（上次推送 / 错误）
-存于 `<destination>/auto.json`，面板与 `/backup github status` 可见。
-
-**换新机器恢复**：新机装好插件、配好同一 `githubRepo` 后执行
-`/backup github pull` —— 拉回远端全部备份（逐份 sha256 校验，损坏即跳过并
-报告），再 `/backup restore latest --sync-deps` 恢复并重装插件依赖；恢复报告
-会按 `.meta.json` 提示这是跨机恢复（绝对路径风险）并列出需重填的凭据清单。
-加 `--restore <前缀|latest>` 可在拉取后直接恢复指定备份。
-
-## Settings 可视面板（Web）
-
-同样的能力在 `dsh web` 的 **Settings → Plugins → 备份** 标签页有可视化入口：
-显示备份目录、自动备份状态、GitHub 同步状态和每份归档的大小，支持一键立即
-备份、逐份校验、**下载**、带 dry-run 预览与二次确认的恢复，以及**从 GitHub
-拉取**备份（新机恢复第一步）。下载走仅限本机的
-`GET /backup-download/<归档名>` 路由。面板经 `backupPanel` Typert Remote
-命名空间（`/api` RPC）与宿主通信；浏览器 bundle 预构建在 `lib/client.js`，
-安装时无需构建。
-
-## 恢复的工作方式
-
-恢复安全性是设计出来的：
-
-1. 先校验归档 sha256——损坏的归档绝不触碰现有数据。
-2. 列出归档条目，任何超出备份根目录的路径都会拒绝恢复（tar 路径穿越防护）。
-3. 预检：`.meta.json` 显示备份来自另一台机器/用户目录时提示绝对路径风险；
-   脱敏归档提示凭据将从本机 vault 还原（跨机则提示重填）。
-4. 当前 `~/.dsh` 先自动快照，再移动到 `~/.dsh.pre-restore-<时间戳>`——恢复是
-   替换而不是合并；`~/.dsh` 已不存在（数据全失/新机首恢复）时跳过快照直接解压。
-5. 解压归档；脱敏归档随后从 vault 还原凭据文件；`--sync-deps` 对各 profile
-   执行 `pnpm install` 重装插件依赖（node_modules 不随归档走）。
-6. 重启 `dsh`，恢复的会话与配置即生效。
-
-`--dry-run` 只显示归档概要与预检提示，不写入任何内容。
-
-## 配置（可选）
-
-在生效的 cordis profile 中为插件声明 `config`：
-
-```yaml
-- id: dsh-backup
-  name: 'dsh-backup'
-  config:
-    destination: '~/Backups/dsh'   # 默认 ~/Desktop/dsh-backups
-    keep: 10                       # 手动备份轮换份数（默认 7）；配置后同时作为自动备份保留份数（未配置时 auto 默认 <24h 3 份 / 否则 7 份）
-    exclude:                       # 额外的 tar --exclude 模式
-      - '*cache*'
-    redact:                        # 追加脱敏文件（相对 ~/.dsh）；false/'off' 关闭脱敏
-      - 'some-plugin/token.json'
-    githubRepo: '账号/dsh-backups' # 可选 GitHub 同步（见下文）
-```
-
-自动备份状态保存在 `<destination>/auto.json`，重启后按上次自动执行时间推算下次触发（不重置节奏）。
-
-## 安全说明
-
-凭据文件默认脱敏（见上文「凭据脱敏与本机 vault」）：归档与 GitHub 同步不含
-明文凭据，明文只存备份目录下的本机 `vault/`（POSIX 700/600）。归档仍可能含
-会话中的敏感内容，请使用私有同步仓库。归档与校验文件在 POSIX 上为
-`chmod 600`（Windows 依赖用户目录 ACL）。
-
-存储说明：插件自有数据（归档、校验和、`auto.json`、`vault/`）直接经
-`node:fs` 写入，与 DSH 自身的会话持久化同一模式——`ctx.fs` 能力是模型面的
-沙箱 surface，不适用于宿主插件的自有存储。
+支持 macOS、Linux、Windows。
 
 ## 安装
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
-# 或从 git 安装：
+# 或者从 GitHub 安装：
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-> ⚠️ npm 包名是 **scoped** 的 `@xiaoyuyu6420/dsh-backup`。npm 上不带 scope
-> 的 `dsh-backup` 是无关的第三方包，请勿安装。
+装完重启 `dsh web`。
+
+> ⚠️ **别装错包**：正确的包名是 `@xiaoyuyu6420/dsh-backup`，带前缀。npm 上另有一个不带前缀的 `dsh-backup`，那是无关的第三方项目，请勿安装。
 
 ## 快速上手
 
-约 30 秒拿到第一个备份：
+大约 30 秒：
 
-1. 安装插件 —— `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup`
-2. 重启 `dsh web` —— 插件发现按进程缓存。
-3. 跑 `/backup` —— 归档连同 sha256 校验文件落到 `~/Desktop/dsh-backups/`。
+1. 按上面装好插件，重启 `dsh web`
+2. 输入 `/backup`
+3. 搞定 —— 备份文件出现在 `~/Desktop/dsh-backups/`，文件名带时间戳
 
-更喜欢点鼠标？同一套流程在 Settings → Plugins → 备份 标签页。
+之后日常最常用的就是这一条命令。想定时自动备份？看下文。
 
-## 依赖
+## 场景速查
 
-- macOS、Linux 或 Windows 10+，PATH 中有 `tar`（Windows 自带 System32 的
-  bsdtar，Git Bash 的 GNU tar 也可以；校验和优先 `sha256sum`/`shasum`，
-  Windows 上回退进程内哈希）
+| 遇到什么情况 | 怎么办 |
+|---|---|
+| 日常备份一次 | `/backup`（或在面板里点「立即备份」） |
+| 怕自己忘备份 | `/backup auto 12`（每 12 小时一次，重启不中断） |
+| 配置改坏了、插件装坏了 | `/backup restore latest --dry-run` 先预览，确认后去掉 `--dry-run` 真正恢复 |
+| `~/.dsh` 整个没了 | `/backup restore latest` |
+| 换新电脑 | 见「换新电脑」一节 |
+| 怀疑备份文件坏了 | `/backup verify all` |
+| 想把备份放云端 | `/backup github repo 账号/dsh-backups`，之后每次备份自动推送（务必用私有仓库） |
+
+## 命令一览
+
+| 命令 | 作用 |
+|---|---|
+| `/backup` | 立即备份 |
+| `/backup list` | 列出所有备份（名称、大小）和自动备份状态 |
+| `/backup verify [前缀\|all]` | 校验备份是否完好，默认只查最新一份 |
+| `/backup restore <前缀\|latest>` | 恢复，支持 `--dry-run`（只预览不动手）和 `--sync-deps`（恢复后重装插件依赖） |
+| `/backup auto <小时数>\|off\|status` | 定时备份的开启、关闭、状态 |
+| `/backup --keep N` | 覆盖保留份数（默认 7） |
+| `/backup github …` | 云同步相关，见「GitHub 同步」 |
+| `/backup delete <前缀\|latest>` | 删除某份备份及其附属文件 |
+
+以上能力模型也能直接调用（工具 `backup_dsh`，`mode=backup|list|verify|restore|auto`，restore 支持 `syncDeps`）。
+
+## 定时自动备份
+
+```
+/backup auto 12
+```
+
+从现在起每 12 小时自动备份一次（间隔可设 1~720 小时）。
+
+- `/backup auto off` —— 关闭
+- `/backup auto status` —— 查看状态
+
+状态记录在备份目录的 `auto.json` 里。重启 DSH 后会接着上次的节奏排期，不会重新计时。保留份数：间隔不足 24 小时的默认留 3 份，更长的留 7 份（可用配置 `keep` 覆盖）。
+
+## 换新电脑
+
+前提：旧电脑已经配置了 GitHub 同步（见下一节）。
+
+1. 新电脑装好插件，配置里填同一个 `githubRepo`
+2. `/backup github pull` —— 把云端备份全部拉回本地（每份都做校验，损坏的自动跳过并报告）
+3. `/backup restore latest --sync-deps` —— 恢复数据，并重装各 profile 的插件依赖
+4. 重启 `dsh`
+
+恢复报告会提示两件事：这份备份来自另一台电脑（留意配置里的绝对路径），以及哪些敏感文件需要重新填（它们不在备份包里，见下节）。想省一步，可以用 `/backup github pull --restore latest` 拉取后直接恢复。
+
+## 敏感文件的处理（密码、token）
+
+`.credentials.yaml`、`.env`、`qq-bridge/config.json` 这类存凭据的文件，默认**不打进备份包**：
+
+- 备份时：明文复制到备份目录下的 `vault/` 文件夹，权限收紧到只有你能读（目录 700、文件 600）。备份包和云端同步的都是脱敏后的版本。
+- 同一台电脑恢复：凭据自动从 `vault/` 放回原位，不用你动手。
+- 新电脑恢复：本机没有 `vault/`，恢复报告会列出缺了哪些文件，重新填一遍即可。
+- 想增减敏感文件：改配置里的 `redact` 列表；`redact: false` 可整个关闭这个机制（不推荐，等于回到 v0.7 之前的明文行为）。
+
+每个备份还附带两个信息文件：`.meta.json`（备份来自哪台机器、哪个用户目录、什么时间）和 `.redacted.json`（哪些文件被脱敏了）。恢复前的预检会读取它们，跨机器恢复时提前给出提醒。
+
+备份文件和校验文件在 macOS / Linux 上权限都是 600（只有你能读）；Windows 靠用户目录的访问控制。
+
+## GitHub 同步（可选）
+
+在插件配置里填上 `githubRepo`，之后每次备份（手动、定时、面板点的）都会自动推送到这个 Git 仓库，删除旧备份也会一并同步：
+
+```yaml
+- id: dsh-backup
+  name: 'dsh-backup'
+  config:
+    githubRepo: '你的账号/dsh-backups'   # 支持 owner/repo、完整 URL 或本地路径
+```
+
+几个要点：
+
+- **务必用私有仓库** —— 备份虽然不含密码明文，但有你的会话内容。
+- 走 https 需要 token：环境变量 `DSH_BACKUP_GITHUB_TOKEN` 或 `GITHUB_TOKEN`。token 只写进同步工作树的凭据文件，不会出现在进程参数里。
+- 推送方式是 `HEAD:main --force-with-lease`，也就是远端 main 会被对齐成本地备份目录的状态——别往这个仓库里手动放别的东西。
+- 单个备份超过 90MB 会跳过推送并提示。
+- 同步状态（上次推送、最近错误）在 `/backup github status` 和面板里都能看到；`/backup github sync` 可以不等下一次备份，立即推送一次。
+
+## 可视化面板
+
+打开 `dsh web` 的 **Settings → Plugins → 备份** 标签页：查看备份列表与大小、自动备份状态、GitHub 同步状态，支持一键备份、逐份校验、**下载**备份、恢复（先预览再二次确认），以及**从 GitHub 拉取**备份（新电脑恢复的第一步）。下载只走本机回环地址的接口，不对外暴露。
+
+## 恢复是怎么工作的
+
+恢复动的是你现有的数据，所以每一步都有保护：
+
+1. **先校验**：备份文件损坏就直接中止，绝不碰现有数据。
+2. **路径检查**：备份包里出现越界路径（tar 路径穿越）就拒绝恢复。
+3. **预检提醒**：备份来自别的机器或用户目录时，提示绝对路径风险；脱敏备份则说明凭据会从本机 vault 还原（跨机恢复会列出要重填的）。
+4. **先留后路**：现有的 `~/.dsh` 先自动快照，再移到 `~/.dsh.pre-restore-<时间戳>`。恢复是整体替换，不是合并，不会被旧文件搅浑；如果 `~/.dsh` 已经不存在（数据已经丢了，或新机首次恢复），跳过快照直接解压。
+5. **解压还原**：解压备份；凭据从 vault 放回；`--sync-deps` 给各 profile 跑 `pnpm install`（node_modules 不进备份包，靠这步重装）。
+6. **重启生效**：重启 `dsh`，会话和配置就回来了。
+
+`--dry-run` 只显示概览和预检提示，不写入任何东西。拿不准就先 dry-run 一次。
+
+## 配置（可选）
+
+默认开箱即用，以下都可不配。想调整时，在生效的 cordis profile 里给插件加 `config`：
+
+```yaml
+- id: dsh-backup
+  name: 'dsh-backup'
+  config:
+    destination: '~/Backups/dsh'   # 备份存放位置（默认 ~/Desktop/dsh-backups）
+    keep: 10                       # 手动备份保留几份（默认 7）；设了以后定时备份也按这个数
+    exclude:                       # 额外排除的内容（tar --exclude 语法）
+      - '*cache*'
+    redact:                        # 追加敏感文件（相对 ~/.dsh 的路径）；false 或 'off' 关闭脱敏
+      - 'some-plugin/token.json'
+    githubRepo: '账号/dsh-backups' # GitHub 同步，见上文
+```
+
+## 系统要求
+
+- macOS、Linux 或 Windows 10+，PATH 里有 `tar`（Windows 自带）
+- 校验优先用 `sha256sum` / `shasum`，没有就自动改用内置哈希（Windows 上就是这样）
 - DSH `0.1.0-rc.6` 或兼容版本
 
 ## 故障排查
 
-- **插件加载失败，报 `client api: method "backupPanel/remove" conflicts with its namespace service`** —— 你装的是 v0.5.0：删除接口的方法名撞上了 DSH 客户端的保留方法名（见 [#2](https://github.com/xiaoyuyu6420/dsh-backup/issues/2)、[#5](https://github.com/xiaoyuyu6420/dsh-backup/issues/5)）。v0.5.1 已将方法改名 `removeEntry` 修复；执行 `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup@latest` 升级后重启 `dsh web` 即可。
-- **Windows 上用哪个 `tar`？** 都可以——Windows 自带 System32 里的 bsdtar，Git Bash 里则是 GNU tar。校验和优先用 `sha256sum`/`shasum`，缺失时自动回退进程内哈希，两种 shell 下 `/backup verify` 都能正常工作。
-- **装错了包** —— npm 包名是 **scoped** 的 `@xiaoyuyu6420/dsh-backup`；不带 scope 的 `dsh-backup` 是无关的第三方包。检查 profile 的插件列表，改用 scoped 名重装。
+- **装错了包** —— 正确的包名是 `@xiaoyuyu6420/dsh-backup`（带前缀）。不带前缀的 `dsh-backup` 是无关的第三方包。检查 profile 的插件列表，用正确名字重装。
+- **插件加载失败，报 `client api: method "backupPanel/remove" conflicts with its namespace service`** —— 你装的是 v0.5.0 旧版（详见 [#2](https://github.com/xiaoyuyu6420/dsh-backup/issues/2)、[#5](https://github.com/xiaoyuyu6420/dsh-backup/issues/5)）。v0.5.1 已修复：执行 `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup@latest` 升级，重启 `dsh web` 即可。
+- **Windows 上用哪个 `tar`？** 都行。系统自带 System32 里的 bsdtar，Git Bash 里是 GNU tar，校验功能在两种 shell 下都能正常工作。
 
 ## 开发
 
-运行时零依赖——宿主插件就是 `lib/index.js`。浏览器半边源码在 `src/`，
-打包（zod 内联、React/Cordis 保持 external）产物 `lib/client.js` 提交进仓库，
-git 安装无需构建：
+运行时零依赖，宿主插件就是 `lib/index.js`。浏览器端源码在 `src/`，打包产物 `lib/client.js` 直接提交进仓库（zod 内联，React / Cordis 保持 external），从 git 安装不需要构建。面板通过 `backupPanel` 命名空间（`/api` RPC）与宿主通信；下载走仅限本机的 `GET /backup-download/<归档名>` 路由。
+
+存储说明：插件自有数据（归档、校验文件、`auto.json`、`vault/`）直接用 `node:fs` 写入，与 DSH 自身的会话持久化同一模式；`ctx.fs` 是模型侧的沙箱接口，不适用于宿主插件的自有存储。
 
 ```sh
 node scripts/build-client.mjs   # 改 src/ 后重新打包客户端
-node scripts/smoke.mjs          # 宿主冒烟（真实临时目录 + 模拟 DSH 服务）
-node scripts/smoke-client.mjs   # 客户端 bundle：握手/schema/标签页注册/SSR
+node scripts/smoke.mjs          # 宿主冒烟测试（真实临时目录 + 模拟 DSH 服务）
+node scripts/smoke-client.mjs   # 客户端 bundle 冒烟（握手 / schema / 标签页注册 / SSR）
 ```
 
 ## 致谢
