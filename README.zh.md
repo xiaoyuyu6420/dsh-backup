@@ -31,8 +31,6 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 
 装完重启 `dsh web`。
 
-> ⚠️ **别装错包**：正确的包名是 `@xiaoyuyu6420/dsh-backup`，带前缀。npm 上另有一个不带前缀的 `dsh-backup`，那是无关的第三方项目，请勿安装。
-
 ## 快速上手
 
 大约 30 秒：

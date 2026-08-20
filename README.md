@@ -31,8 +31,6 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 
 Then restart `dsh web`.
 
-> ⚠️ **Don't install the wrong package**: the correct name is `@xiaoyuyu6420/dsh-backup`, with the scope. The unscoped `dsh-backup` on npm is an unrelated third-party package.
-
 ## Quickstart
 
 About 30 seconds:
