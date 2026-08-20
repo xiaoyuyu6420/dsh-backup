@@ -87,6 +87,14 @@ const githubSyncSchema = z.object({
   tooBig: z.array(z.string()),
 });
 
+const githubPullSchema = z.object({
+  ok: z.boolean(),
+  summary: z.string(),
+  pulled: z.array(z.string()),
+  corrupt: z.array(z.string()),
+  total: z.number().int(),
+});
+
 const removeSchema = z.object({
   ok: z.boolean(),
   summary: z.string(),
@@ -132,6 +140,7 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('setAuto', [hoursParam], setAutoSchema, false),
     strictDescriptor('githubStatus', [], githubStatusSchema, false),
     strictDescriptor('githubSyncNow', [], githubSyncSchema, true),
+    strictDescriptor('githubPull', [], githubPullSchema, true),
     strictDescriptor('removeEntry', [selectorParam], removeSchema, true),
     strictDescriptor('setGithubRepo', [repoParam], setGithubRepoSchema, false),
   ]),
@@ -187,6 +196,7 @@ export function apply(ctx) {
       setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
       githubStatus: async () => unwrap(await ns().githubStatus()),
       githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
+      githubPull: async () => unwrap(await ns().githubPull()),
       removeEntry: async (selector) => unwrap(await ns().removeEntry(selector)),
       setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
     };

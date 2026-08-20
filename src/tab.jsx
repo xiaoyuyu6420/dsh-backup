@@ -66,6 +66,7 @@ export function BackupTab({ panel, t }) {
   const verifyOne = (name) => { void run(`verify:${name}`, () => panel.verify(name)); };
   const setAuto = (hours) => { void run('auto', () => panel.setAuto(hours)).then(reload); };
   const syncNow = () => { void run('github-sync', () => panel.githubSyncNow()).then(reload); };
+  const pullNow = () => { void run('github-pull', () => panel.githubPull()).then(reload); };
   const saveRepo = (value) => {
     setConfirmDelete(null);
     void run('github-repo', () => panel.setGithubRepo(value)).then(reload);
@@ -213,6 +214,9 @@ export function BackupTab({ panel, t }) {
                 </button>
                 <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={syncNow}>
                   {busy === 'github-sync' ? t('githubBusy') : t('githubSyncNow')}
+                </button>
+                <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={pullNow}>
+                  {busy === 'github-pull' ? t('githubPullBusy') : t('githubPull')}
                 </button>
               </div>
             </div>

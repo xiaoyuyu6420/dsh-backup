@@ -10,20 +10,52 @@ English | [简体中文](README.zh.md)
 One-command backup **and restore** for DeepSeek Harness user data — sessions,
 settings, credentials, skills, and plugin config under `~/.dsh`, excluding
 reinstallable `node_modules` — with sha256 checksums, integrity verification,
-automatic rotation, and scheduled auto-backup that survives restarts. Works on
-macOS, Linux, and Windows.
+automatic rotation, and scheduled auto-backup that survives restarts.
+**Credentials are redacted by default**: plaintext never enters an archive or
+the GitHub sync, only a local vault, and is restored automatically. Cross-machine
+restores get preflight hints and a one-command `github pull`. Works on macOS,
+Linux, and Windows.
+
+## Scenario cheat sheet
+
+| Scenario | What to run |
+|---|---|
+| Everyday backup | `/backup` (or Settings → Plugins → Backup → Back up now) |
+| Don't trust yourself to remember | `/backup auto 12` — scheduled, survives restarts |
+| Broke a config / bad plugin install | `/backup restore latest --dry-run`, then drop the flag |
+| `~/.dsh` is gone entirely | `/backup restore latest` — no existing data means no snapshot, straight to restore |
+| New machine | Install the plugin, set the same `githubRepo` → `/backup github pull` → `/backup restore latest --sync-deps` |
+| Suspect a corrupt archive | `/backup verify all` |
+| Cloud copy | `/backup github repo name/dsh-backups` (private repo); every backup pushes afterwards |
 
 ## Commands
 
 - **`/backup`** — immediately back up `~/.dsh` to `~/Desktop/dsh-backups/dsh-<timestamp>.tar.gz`
 - **`/backup list`** — list existing backups (name + size) and auto-backup status
 - **`/backup verify [prefix|all]`** — validate archive checksums (default: the newest)
-- **`/backup restore <prefix|latest> [--dry-run]`** — restore `~/.dsh` from an archive
+- **`/backup restore <prefix|latest> [--dry-run] [--sync-deps]`** — restore `~/.dsh` from an archive (`--sync-deps` reinstalls per-profile plugin dependencies afterwards)
 - **`/backup auto <N>|off|status`** — auto-backup every N hours (1–720; retains 3 copies below 24h, 7 otherwise, unless `config.keep` overrides; persisted across restarts)
 - **`/backup --keep N`** — override the rotation count (default 7)
-- **`/backup github status|sync|repo <address|off>`** — GitHub sync status / push now / set the sync repository
-- **`/backup delete|rm <prefix|latest>`** — delete a backup and its checksum sidecar
-- **`backup_dsh` tool** — same capability for the model (`mode=backup|list|verify|restore|auto`)
+- **`/backup github status|sync|pull [--restore <prefix|latest>]|repo <address|off>`** — sync status / push now / pull backups from the repo / set the sync repository
+- **`/backup delete|rm <prefix|latest>`** — delete a backup and its sidecars
+- **`backup_dsh` tool** — same capability for the model (`mode=backup|list|verify|restore|auto`; restore accepts `syncDeps`)
+
+## Credential redaction & the local vault
+
+Credential files (by default `.credentials.yaml`, `.env`, `qq-bridge/config.json`;
+extend or disable via `config.redact`) **never enter an archive**:
+
+- On backup, plaintext copies are mirrored into `vault/` under the backup
+  directory (POSIX mode 700/600); archives and the GitHub sync carry only
+  redacted data.
+- Restoring on the same machine copies the credentials back from the vault —
+  full fidelity.
+- Restoring on a new machine (no vault) lists the missing credential files and
+  tells you to re-enter them.
+- Each archive ships with `.redacted.json` (the redaction list) and
+  `.meta.json` (host / home / timestamp) sidecars; restore preflight uses them
+  to flag cross-machine path risks and credentials to re-enter.
+- `config.redact: false` restores the v0.6.x plaintext behavior (not recommended).
 
 ## GitHub sync
 
@@ -38,19 +70,29 @@ deletions stay in sync:
     githubRepo: 'your-name/dsh-backups'   # owner/repo, full URL, or a local path
 ```
 
-Use a **private** repository — archives contain plaintext credentials. For an
-`https` remote, set the token in the environment (`DSH_BACKUP_GITHUB_TOKEN` or
-`GITHUB_TOKEN`); it is only written into the sync worktree's credential file
-(never process args). Push is `HEAD:main --force-with-lease`; archives over
-90 MB are skipped with a notice. State (last push, last error) lives in
-`<destination>/auto.json` and shows in the panel and `/backup github status`.
+Use a **private** repository — archives are redacted but still contain session
+content. For an `https` remote, set the token in the environment
+(`DSH_BACKUP_GITHUB_TOKEN` or `GITHUB_TOKEN`); it is only written into the sync
+worktree's credential file (never process args). Push is `HEAD:main
+--force-with-lease`; archives over 90 MB are skipped with a notice. State (last
+push, last error) lives in `<destination>/auto.json` and shows in the panel and
+`/backup github status`.
+
+**Restoring on a new machine**: install the plugin, configure the same
+`githubRepo`, then run `/backup github pull` — it fetches every remote backup
+(each one sha256-verified; corrupt archives are skipped and reported), then
+`/backup restore latest --sync-deps` restores and reinstalls plugin
+dependencies. The restore report reads `.meta.json` to flag the cross-machine
+restore (absolute-path risks) and lists the credentials to re-enter.
+`--restore <prefix|latest>` restores a specific archive right after pulling.
 
 ## Settings panel (Web)
 
 The same controls have a visual entry: a **Backup** tab inside Settings → Plugins
 (`dsh web`). It shows the destination, auto-backup state, GitHub sync status, and
 every archive with its size, and offers one-click back-up-now, per-archive
-verify, download, and restore with a dry-run preview plus explicit confirmation.
+verify, download, restore with a dry-run preview plus explicit confirmation,
+and **pull from GitHub** (the first step of a new-machine restore).
 Downloads stream from the loopback-only route `GET /backup-download/<name>`.
 The tab talks to the host through the `backupPanel` Typert Remote namespace
 (`/api` RPC); the browser bundle ships prebuilt in `lib/client.js` — no build
@@ -62,10 +104,12 @@ Restore is safe by construction:
 
 1. The archive's sha256 is verified first — a corrupt archive never touches existing data.
 2. Entries are listed and any path outside the backup root rejects the restore (tar path-traversal guard).
-3. The current `~/.dsh` is snapshotted, then moved aside to `~/.dsh.pre-restore-<timestamp>` — restore replaces rather than merges.
-4. The archive is extracted; restart `dsh` afterwards so restored sessions and settings take effect.
+3. Preflight: `.meta.json` flags a backup from another machine/home (absolute-path risks); redacted archives note that credentials come back from the local vault (or must be re-entered cross-machine).
+4. The current `~/.dsh` is snapshotted, then moved aside to `~/.dsh.pre-restore-<timestamp>` — restore replaces rather than merges. A missing `~/.dsh` (data gone / first restore on a new machine) skips the snapshot and extracts directly.
+5. The archive is extracted; redacted archives then restore credentials from the vault; `--sync-deps` runs `pnpm install` per profile (node_modules never travel inside archives).
+6. Restart `dsh` afterwards so restored sessions and settings take effect.
 
-`--dry-run` shows the archive summary without writing anything.
+`--dry-run` shows the archive summary and preflight hints without writing anything.
 
 ## Configuration (optional)
 
@@ -79,6 +123,8 @@ Plugin `config` in the active cordis profile:
     keep: 10                       # manual rotation count (default 7); when set, also the auto-backup retention — auto keeps 3 copies below 24h, 7 otherwise by default
     exclude:                       # extra tar --exclude patterns
       - '*cache*'
+    redact:                        # extra redacted files (relative to ~/.dsh); false/'off' disables redaction
+      - 'some-plugin/token.json'
     githubRepo: 'name/dsh-backups' # optional GitHub sync (see below)
 ```
 
@@ -86,15 +132,17 @@ Auto-backup state lives in `<destination>/auto.json` and resumes after restart �
 
 ## Security note
 
-Backups contain plaintext credentials (`.credentials.yaml`, `qq-bridge/config.json`).
-Archives and checksum sidecars are chmod 600 on POSIX (Windows relies on
-per-user profile ACLs), but do **not** sync the backup directory to untrusted
-locations, and treat archives as sensitive as your API keys.
+Credential files are redacted by default (see above): archives and the GitHub
+sync carry no plaintext credentials — plaintext lives only in the local
+`vault/` under the backup directory (POSIX 700/600). Archives may still contain
+sensitive session content, so keep the sync repository private. Archives and
+checksum sidecars are chmod 600 on POSIX (Windows relies on per-user profile
+ACLs).
 
 Storage note: the plugin writes its own data (archives, checksum sidecars,
-`auto.json`) directly through `node:fs`, the same pattern as DSH's own session
-persistence — the `ctx.fs` capability is the model-facing sandboxed surface and
-does not apply to host-owned storage.
+`auto.json`, `vault/`) directly through `node:fs`, the same pattern as DSH's
+own session persistence — the `ctx.fs` capability is the model-facing sandboxed
+surface and does not apply to host-owned storage.
 
 ## Install
 
