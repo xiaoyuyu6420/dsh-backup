@@ -91,6 +91,8 @@
 
 运行时零依赖，宿主插件就是 `lib/index.js`。浏览器端源码在 `src/`，打包产物 `lib/client.js` 直接提交进仓库（zod 内联，React / Cordis 保持 external），从 git 安装不需要构建。面板通过 `backupPanel` 命名空间（`/api` RPC）与宿主通信；下载走仅限本机的 `GET /backup-download/<归档名>` 路由。
 
+**RPC 方法名保留字**（贡献者注意）：`backupPanel` 的新增 RPC 方法名不得撞上宿主 `RemoteNamespaceService` 的命名空间成员——`ctx`、`empty`、`invokeRemote`、`methods`、`name`、`namespace`、`has`、`install`、`installDirect`、`installScoped`、`remove`，以及 `Object.prototype` 名（`toString`、`valueOf` 等）。撞上会在运行时装配阶段让插件整体加载失败（v0.5.0 的 `backupPanel/remove` 事故，见 #2）。`node scripts/smoke.mjs` 场景 19 会对全部注册方法名做预检，提 PR 前先跑一遍。
+
 存储说明：插件自有数据（归档、校验文件、`auto.json`、`vault/`）直接用 `node:fs` 写入，与 DSH 自身的会话持久化同一模式；`ctx.fs` 是模型侧的沙箱接口，不适用于宿主插件的自有存储。
 
 ```sh
