@@ -48,6 +48,26 @@ async function mkTmpHome() {
   return { dir, home, root: root.split(path.sep).join('/'), dsh };
 }
 
+// ---------- RPC 方法名保留字（issue #9） ----------
+// 镜像宿主 dsh-api-gateway 的 RemoteNamespaceService.assertMethodAvailable 语义：
+// REMOTE_NAMESPACE_FIELDS ∪ 原型链成员（含 Object.prototype，`in` 检查会命中）。
+// 提取自 @deepseek-ai/dsh-api-gateway@0.1.1-rc.2 的 client.js；宿主升级若
+// 新增成员，需同步此清单。
+const REMOTE_NAMESPACE_FIELDS = new Set(['ctx', 'empty', 'invokeRemote', 'methods', 'name', 'namespace']);
+const REMOTE_NAMESPACE_PROTOTYPE = new Set([
+  'assertMethodAvailable', 'constructor', 'empty', 'has', 'install',
+  'installDirect', 'installScoped', 'remove',
+]);
+const OBJECT_PROTOTYPE_MEMBERS = new Set([
+  'toString', 'toLocaleString', 'valueOf', 'hasOwnProperty',
+  'isPrototypeOf', 'propertyIsEnumerable',
+]);
+function assertPanelMethodAvailable(namespace, method) {
+  if (REMOTE_NAMESPACE_FIELDS.has(method) || REMOTE_NAMESPACE_PROTOTYPE.has(method) || OBJECT_PROTOTYPE_MEMBERS.has(method)) {
+    throw new Error(`client api: method ${JSON.stringify(`${namespace}/${method}`)} conflicts with its namespace service`);
+  }
+}
+
 // ---------- DSH 服务桩 ----------
 function makeCtx({ home, dsh, env }) {
   const intervals = [];
@@ -709,6 +729,22 @@ async function main() {
         await fs.rm(env18.dir, { recursive: true, force: true });
       }
     }
+
+    console.log('19) RPC 方法名保留字预检（#2 事故防复发，issue #9）');
+    const contrib19 = mock.typertContribs[0];
+    const methods19 = contrib19 ? contrib19.invocations.map((d) => d.method) : [];
+    ok(methods19.length === 10, `注册了 ${methods19.length} 个 RPC 方法（期望 10）`);
+    let reservedHit = null;
+    for (const name of methods19) {
+      try { assertPanelMethodAvailable('backupPanel', name); } catch { reservedHit = name; }
+    }
+    ok(reservedHit === null, `现有方法名全部避开保留字${reservedHit ? `（撞上 ${reservedHit}）` : ''}`);
+    let removeRejected = false;
+    try { assertPanelMethodAvailable('backupPanel', 'remove'); } catch { removeRejected = true; }
+    ok(removeRejected, '保留名 remove 会被预检拒绝');
+    let toStringRejected = false;
+    try { assertPanelMethodAvailable('backupPanel', 'toString'); } catch { toStringRejected = true; }
+    ok(toStringRejected, 'Object.prototype 名 toString 会被预检拒绝');
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
