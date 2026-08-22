@@ -19,7 +19,7 @@ dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-Then restart `dsh web`. Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.0-rc.6` or compatible.
+Then restart `dsh web`. Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2` or compatible.
 
 ## Quickstart
 
