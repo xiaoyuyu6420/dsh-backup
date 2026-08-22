@@ -45,25 +45,30 @@ export function BackupTab({ panel, t }) {
 
   const reload = () => { setRequest(v => v + 1); };
 
-  // Fetch settings on mount
+  // 将服务端返回的 settings 数据同步到所有输入状态
+  const applySettings = (data) => {
+    setSettings(data);
+    setSettingsRevision(data.revision);
+    setHasOverrides(!!data.hasOverrides);
+    setDestInput(data.destination || '');
+    setKeepInput(String(data.keep ?? 7));
+    setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
+    settingsDirtyRef.current = false;
+    setSettingsDirty(false);
+  };
+
+  // 拉取 settings（挂载 + reload 时均调用，确保 409 后 revision 刷新）
   useEffect(() => {
     let cancelled = false;
     fetch('/dsh-backup/settings', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled || !data || data.error) return;
-        setSettings(data);
-        setSettingsRevision(data.revision);
-        setHasOverrides(!!data.hasOverrides);
-        setDestInput(data.destination || '');
-        setKeepInput(String(data.keep ?? 7));
-        setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
-        settingsDirtyRef.current = false;
-        setSettingsDirty(false);
+        applySettings(data);
       })
       .catch(() => { /* settings service unavailable */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [request]);
 
   useEffect(() => {
     let current = true;
@@ -149,7 +154,7 @@ export function BackupTab({ panel, t }) {
       });
       const data = await res.json();
       if (res.status === 409) {
-        // Conflict: reload latest values
+        // 冲突：reload 会触发 useEffect 重新 fetch settings，更新 revision + inputs
         setSettingsStatus('error');
         setSettingsMsg(t('settingsConflict'));
         reload();
@@ -160,14 +165,7 @@ export function BackupTab({ panel, t }) {
         setSettingsMsg(data.error === 'invalid-field' ? t('settingsInvalid') : String(data.error));
         return;
       }
-      setSettings(data);
-      setSettingsRevision(data.revision);
-      setHasOverrides(!!data.hasOverrides);
-      setDestInput(data.destination || '');
-      setKeepInput(String(data.keep ?? 7));
-      setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
-      settingsDirtyRef.current = false;
-      setSettingsDirty(false);
+      applySettings(data);
       setSettingsStatus('saved');
       setSettingsMsg('');
       setTimeout(() => setSettingsStatus(''), 2000);
@@ -188,19 +186,18 @@ export function BackupTab({ panel, t }) {
         body: JSON.stringify({ reset: true, revision: settingsRevision }),
       });
       const data = await res.json();
+      if (res.status === 409) {
+        setSettingsStatus('error');
+        setSettingsMsg(t('settingsConflict'));
+        reload();
+        return;
+      }
       if (!res.ok || data.error) {
         setSettingsStatus('error');
         setSettingsMsg(String(data.error));
         return;
       }
-      setSettings(data);
-      setSettingsRevision(data.revision);
-      setHasOverrides(!!data.hasOverrides);
-      setDestInput(data.destination || '');
-      setKeepInput(String(data.keep ?? 7));
-      setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
-      settingsDirtyRef.current = false;
-      setSettingsDirty(false);
+      applySettings(data);
       setSettingsStatus('saved');
       setSettingsMsg('');
       setTimeout(() => setSettingsStatus(''), 2000);
