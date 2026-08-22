@@ -19,7 +19,7 @@ dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-装完重启 `dsh web`。要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.0-rc.6` 或兼容版本。
+装完重启 `dsh web`。要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2` 或兼容版本。
 
 ## 快速上手
 
