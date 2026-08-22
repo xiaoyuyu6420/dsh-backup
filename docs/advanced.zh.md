@@ -66,7 +66,19 @@
 
 ## 配置参考
 
-默认开箱即用，以下都可不配。想调整时，在生效的 cordis profile 里给插件加 `config`：
+默认开箱即用，以下都可不配。配置按优先级从高到低解析：
+
+1. **`settings.yaml`** —— 用户通过 Web 面板保存或 `/dsh-backup/settings` HTTP API 写入；持久化在 `~/.dsh/settings.yaml`，立即生效。
+2. **`cordis.patch.yml`** —— profile 级 `config` 块（传统 DSH 插件配置）；作为 base 层。
+3. **Schema 默认值** —— 内置默认（`destination: ~/Desktop/dsh-backups`、`keep: 7`、`exclude: []`、`redact: [敏感文件默认]`、`githubRepo: ''`）。
+
+### 通过 Web 面板（推荐）
+
+打开 Settings → Plugins → 备份，在总览卡片中编辑备份目录 / 保留份数 / 排除模式，点击**保存**。修改写入 `settings.yaml`，下次备份即生效，无需重启。点击**恢复默认**可清除用户层覆盖、回退到 `cordis.patch.yml` 的 base 值。
+
+### 通过 `cordis.patch.yml`（管理员 / 批量部署）
+
+在生效的 cordis profile 里给插件加 `config`，作为 base 层；用户在面板中的编辑会覆盖这些值：
 
 ```yaml
 - id: dsh-backup
@@ -89,7 +101,7 @@
 
 ## 开发
 
-运行时零依赖，宿主插件就是 `lib/index.js`。浏览器端源码在 `src/`，打包产物 `lib/client.js` 直接提交进仓库（zod 内联，React / Cordis 保持 external），从 git 安装不需要构建。面板通过 `backupPanel` 命名空间（`/api` RPC）与宿主通信；下载走仅限本机的 `GET /backup-download/<归档名>` 路由。
+运行时依赖 `@deepseek-ai/dsh-settings` 与 `@deepseek-ai/schemastery`（settings seam，均为 peer dependency），宿主插件就是 `lib/index.js`。浏览器端源码在 `src/`，打包产物 `lib/client.js` 直接提交进仓库（zod 内联，React / Cordis 保持 external），从 git 安装不需要构建。面板通过 `backupPanel` 命名空间（`/api` RPC）与宿主通信；设置经 `/dsh-backup/settings` HTTP 路由走官方 `ctx.settings` seam；下载走仅限本机的 `GET /backup-download/<归档名>` 路由。
 
 **RPC 方法名保留字**（贡献者注意）：`backupPanel` 的新增 RPC 方法名不得撞上宿主 `RemoteNamespaceService` 的命名空间成员——`ctx`、`empty`、`invokeRemote`、`methods`、`name`、`namespace`、`has`、`install`、`installDirect`、`installScoped`、`remove`，以及 `Object.prototype` 名（`toString`、`valueOf` 等）。撞上会在运行时装配阶段让插件整体加载失败（v0.5.0 的 `backupPanel/remove` 事故，见 #2）。`node scripts/smoke.mjs` 场景 19 会对全部注册方法名做预检，提 PR 前先跑一遍。
 
