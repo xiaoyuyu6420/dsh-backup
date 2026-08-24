@@ -34,6 +34,14 @@ jobs:
       - name: Install latest dsh host
         run: npm i -g @deepseek-ai/dsh@latest
 
+      # e2e 以 link 方式挂载本仓库，插件的 peer imports 从 repo 的 node_modules 解析——
+      # 必须先装依赖（含 auto-install 的 peers），否则 boot 报 Cannot find package（见 run 32775395308）。
+      - name: Install repo dependencies (peers resolve from here)
+        env:
+          npm_config_minimum_release_age: 0
+          npm_config_minimumReleaseAge: 0
+        run: pnpm install
+
       # 本 job 的职责就是追新：显式豁免 pnpm 默认 24h 冷却期，
       # 否则新列车发布后 24h 内本巡检必然红（与日常 CI 的默认防线不冲突）。
       - name: Run isolated-host e2e against latest train

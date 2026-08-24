@@ -14,6 +14,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,6 +42,7 @@ function run(cmd, args, opts = {}) {
 
 let bootProc = null;
 let home = null;
+let packDir = null;
 let bootLogPath = null;
 let bootLogStream = null;
 
@@ -106,10 +108,18 @@ async function waitBoot() {
 async function main() {
   console.log(`[e2e-host] repo=${repoRoot} port=${PORT}`);
 
-  // ---------- 准备：隔离 DSH_HOME + link 本地包 ----------
+  // ---------- 准备：隔离 DSH_HOME + tarball 安装 ----------
+  // 不用 `dsh plugin add <repo>`（link 方式）：link 引导的 profile 里 panel RPC 报
+  // `active Service "backupPanel" is unavailable`（宿主 link 路径的差异，npm/tarball 正常）。
+  // tarball 安装 = 真实用户路径，且顺带验证发布物内容。
   if (!spawnSync('dsh', ['--version']).status === 0) throw new Error('PATH 里找不到 dsh CLI');
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-'));
-  run('dsh', ['plugin', '--profile', 'web', 'add', repoRoot], { env: { ...process.env, DSH_HOME: home }, cwd: path.dirname(home) });
+  packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-pack-'));
+  console.log(`[e2e-host] 打包 tarball...`);
+  run('pnpm', ['pack', '--pack-destination', packDir], { cwd: repoRoot });
+  const tarball = fs.readdirSync(packDir).find((f) => f.endsWith('.tgz'));
+  if (!tarball) throw new Error('pnpm pack 未产出 tarball');
+  run('dsh', ['plugin', '--profile', 'web', 'add', path.join(packDir, tarball)], { env: { ...process.env, DSH_HOME: home }, cwd: path.dirname(home) });
 
   const patchFile = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.writeFileSync(patchFile, [
@@ -131,6 +141,33 @@ async function main() {
     indexHtml.includes('/plugins/@deepseek-ai/dsh-client-modules/client.js'),
     'HTML 缺少 dsh-client-modules/client.js 预加载——宿主可能是旧列车或插件树未进 web 组合',
   );
+
+  // panel RPC 可用性（link 安装的 profile 会报 service-unavailable，tarball/npm 正常）
+  let rpcDetail = '请求失败';
+  let rpcOk = false;
+  try {
+    const rpcRes = await fetch(`${BASE}/api/backupPanel/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId: randomUUID(),
+        method: 'backupPanel/status',
+        payload: { args: {} },
+      }),
+    });
+    const rpcText = await rpcRes.text();
+    try {
+      const rpc = JSON.parse(rpcText);
+      rpcOk = rpc?.type === 'server-response' && rpc?.result?.ok === true;
+      rpcDetail = `HTTP ${rpcRes.status} ${rpcText.slice(0, 200)}`;
+    } catch {
+      rpcDetail = `HTTP ${rpcRes.status} 非JSON: ${rpcText.slice(0, 120)}`;
+    }
+  } catch (err) {
+    rpcDetail = `fetch 异常: ${err.message}`;
+  }
+  check('panel RPC backupPanel/status 可调用', rpcOk, rpcDetail);
 
   // ---------- settings seam ----------
   const settingsRes = await fetch(`${BASE}/dsh-backup/settings`).then((r) => r.json()).catch(() => null);
@@ -204,4 +241,5 @@ try {
 } finally {
   await stopBoot();
   if (home) fs.rmSync(home, { recursive: true, force: true });
+  if (packDir) fs.rmSync(packDir, { recursive: true, force: true });
 }
