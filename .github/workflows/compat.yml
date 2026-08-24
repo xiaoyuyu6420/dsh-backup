@@ -47,6 +47,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh label create host-compat -R "$GITHUB_REPOSITORY" --color d93f0b \
+            --description "Latest @deepseek-ai/dsh train breaks this plugin" --force || true
           BODY=$(cat <<'EOF'
           Host compat e2e failed against the latest `@deepseek-ai/dsh`.
 

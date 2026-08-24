@@ -41,15 +41,30 @@ function run(cmd, args, opts = {}) {
 
 let bootProc = null;
 let home = null;
+let bootLogPath = null;
+let bootLogStream = null;
 
 function startBoot() {
+  bootLogPath = path.join(home, 'boot.log');
+  bootLogStream = fs.createWriteStream(bootLogPath);
   bootProc = spawn('dsh', ['web', '--no-open'], {
     cwd: home,
     env: { ...process.env, DSH_HOME: home },
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  bootProc.stdout.pipe(bootLogStream);
+  bootProc.stderr.pipe(bootLogStream);
   bootProc.unref();
+}
+
+function dumpBootLog(reason) {
+  try {
+    const text = fs.readFileSync(bootLogPath, 'utf8').trim();
+    console.error(`[e2e-host] boot 日志（${reason}）最后 40 行:\n${text.split('\n').slice(-40).join('\n')}`);
+  } catch (e) {
+    console.error(`[e2e-host] boot 日志不可读: ${e.message}`);
+  }
 }
 
 async function stopBoot() {
@@ -75,7 +90,8 @@ async function waitBoot() {
   const deadline = Date.now() + BOOT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (bootProc && bootProc.exitCode !== null) {
-      throw new Error(`dsh web 提前退出 (code ${bootProc.exitCode})——插件树被拒绝加载`);
+      dumpBootLog(`提前退出 code ${bootProc.exitCode}`);
+      throw new Error(`dsh web 提前退出 (code ${bootProc.exitCode})——见上方 boot 日志`);
     }
     try {
       const res = await fetch(BASE, { signal: AbortSignal.timeout(1500) });
@@ -83,6 +99,7 @@ async function waitBoot() {
     } catch { /* 未就绪 */ }
     await new Promise((r) => setTimeout(r, 2000));
   }
+  dumpBootLog('等待超时');
   throw new Error(`boot 超时（${BOOT_TIMEOUT_MS / 1000}s 内未在 ${BASE} 就绪）`);
 }
 
