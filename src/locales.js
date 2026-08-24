@@ -55,6 +55,17 @@ export const zh = {
   clear: '清除',
   delete: '删除',
   confirmDelete: '确认删除？',
+  // Settings card
+  settingsDestLabel: '备份目录',
+  settingsKeepLabel: '保留份数',
+  settingsExcludeLabel: '排除模式',
+  settingsExcludeHint: '多个模式用逗号分隔，如 *cache*, *.tmp',
+  reset: '恢复默认',
+  settingsSaved: '已保存，立即生效。',
+  settingsConflict: '配置已在别处修改，已加载最新值。',
+  settingsInvalid: '以下字段的值不合法',
+  settingsSaveError: '保存失败，请重试。',
+  settingsSourceHint: '默认值来自 cordis.patch.yml；在此修改会保存到 settings.yaml 并立即生效，无需重启。',
 };
 
 export const en = {
@@ -110,4 +121,15 @@ export const en = {
   clear: 'Clear',
   delete: 'Delete',
   confirmDelete: 'Confirm delete?',
+  // Settings card
+  settingsDestLabel: 'Backup destination',
+  settingsKeepLabel: 'Keep count',
+  settingsExcludeLabel: 'Exclude patterns',
+  settingsExcludeHint: 'Separate multiple patterns with commas, e.g. *cache*, *.tmp',
+  reset: 'Reset to defaults',
+  settingsSaved: 'Saved — applies immediately.',
+  settingsConflict: 'Settings were changed elsewhere; the latest values have been loaded.',
+  settingsInvalid: 'Invalid value(s) for the field(s)',
+  settingsSaveError: 'Save failed, please retry.',
+  settingsSourceHint: 'Defaults come from cordis.patch.yml; edits here are saved to settings.yaml and apply immediately — no restart needed.',
 };

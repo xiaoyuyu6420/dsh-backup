@@ -31,7 +31,42 @@ export function BackupTab({ panel, t }) {
   const [repoInput, setRepoInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
 
+  // Settings state (from /dsh-backup/settings)
+  const [settings, setSettings] = useState(null);
+  const [settingsRevision, setSettingsRevision] = useState(undefined);
+  const [hasOverrides, setHasOverrides] = useState(false);
+  const [destInput, setDestInput] = useState('');
+  const [keepInput, setKeepInput] = useState('');
+  const [excludeInput, setExcludeInput] = useState('');
+  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsStatus, setSettingsStatus] = useState(''); // '' | 'saving' | 'saved' | 'error'
+  const [settingsMsg, setSettingsMsg] = useState('');
+
   const reload = () => { setRequest(v => v + 1); };
+
+  // 将服务端返回的 settings 数据同步到所有输入状态
+  const applySettings = (data) => {
+    setSettings(data);
+    setSettingsRevision(data.revision);
+    setHasOverrides(!!data.hasOverrides);
+    setDestInput(data.destination || '');
+    setKeepInput(data.keep > 0 ? String(data.keep) : '');
+    setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
+    setSettingsDirty(false);
+  };
+
+  // 拉取 settings（挂载 + reload 时均调用，确保 409 后 revision 刷新）
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/dsh-backup/settings', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled || !data || data.error) return;
+        applySettings(data);
+      })
+      .catch(() => { /* settings service unavailable */ });
+    return () => { cancelled = true; };
+  }, [request]);
 
   useEffect(() => {
     let current = true;
@@ -97,6 +132,88 @@ export function BackupTab({ panel, t }) {
       : ''
   );
 
+  // Settings save/reset
+  const saveSettings = async () => {
+    if (!settings) return;
+    setSettingsStatus('saving');
+    setSettingsMsg('');
+    const keep = Number(keepInput);
+    const exclude = excludeInput.split(',').map((s) => s.trim()).filter(Boolean);
+    try {
+      const res = await fetch('/dsh-backup/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destination: destInput.trim(),
+          keep: Number.isFinite(keep) && keep >= 1 ? Math.floor(keep) : 0,
+          exclude,
+          revision: settingsRevision,
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        // 冲突：reload 会触发 useEffect 重新 fetch settings，更新 revision + inputs
+        setSettingsStatus('error');
+        setSettingsMsg(t('settingsConflict'));
+        reload();
+        return;
+      }
+      if (!res.ok || data.error) {
+        setSettingsStatus('error');
+        setSettingsMsg(data.error === 'invalid-field' ? t('settingsInvalid') : String(data.error));
+        return;
+      }
+      applySettings(data);
+      setSettingsStatus('saved');
+      setSettingsMsg('');
+      setTimeout(() => setSettingsStatus(''), 2000);
+    } catch {
+      setSettingsStatus('error');
+      setSettingsMsg(t('settingsSaveError'));
+    }
+  };
+
+  const resetSettings = async () => {
+    if (!settings) return;
+    setSettingsStatus('saving');
+    setSettingsMsg('');
+    try {
+      const res = await fetch('/dsh-backup/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset: true, revision: settingsRevision }),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        setSettingsStatus('error');
+        setSettingsMsg(t('settingsConflict'));
+        reload();
+        return;
+      }
+      if (!res.ok || data.error) {
+        setSettingsStatus('error');
+        setSettingsMsg(String(data.error));
+        return;
+      }
+      applySettings(data);
+      setSettingsStatus('saved');
+      setSettingsMsg('');
+      setTimeout(() => setSettingsStatus(''), 2000);
+    } catch {
+      setSettingsStatus('error');
+      setSettingsMsg(t('settingsSaveError'));
+    }
+  };
+
+  const onSettingsFieldChange = (field, value) => {
+    setSettingsDirty(true);
+    setSettingsStatus('');
+    setSettingsMsg('');
+    if (field === 'destination') setDestInput(value);
+    else if (field === 'keep') setKeepInput(value);
+    else if (field === 'exclude') setExcludeInput(value);
+  };
+
   const githubTone = github === null || github.repo === null
     ? undefined
     : (github.tokenSet ? 'ok' : 'warn');
@@ -124,13 +241,74 @@ export function BackupTab({ panel, t }) {
             <dl className="dsb-kv">
               <dt>{t('dshHome')}</dt>
               <dd>{snap.dshHome}</dd>
-              <dt>{t('destination')}</dt>
-              <dd>{snap.destination}</dd>
-              <dt>{t('keepDefault')}</dt>
-              <dd>{snap.keepDefault} {t('copies')}</dd>
               <dt>{t('lastAuto')}</dt>
               <dd>{snap.lastAuto ?? t('none')}</dd>
             </dl>
+            {/* Editable settings fields */}
+            {settings !== null ? (
+              <>
+                <div className="dsb-divider" />
+                <dl className="dsb-kv">
+                  <dt>{t('settingsDestLabel')}</dt>
+                  <dd>
+                    <input
+                      type="text"
+                      className="dsb-input"
+                      value={destInput}
+                      onChange={(e) => onSettingsFieldChange('destination', e.target.value)}
+                      placeholder="~/Desktop/dsh-backups"
+                    />
+                  </dd>
+                  <dt>{t('settingsKeepLabel')}</dt>
+                  <dd>
+                    <input
+                      type="number"
+                      className="dsb-input"
+                      min="1"
+                      max="999"
+                      value={keepInput}
+                      onChange={(e) => onSettingsFieldChange('keep', e.target.value)}
+                    />
+                  </dd>
+                  <dt>{t('settingsExcludeLabel')}</dt>
+                  <dd>
+                    <input
+                      type="text"
+                      className="dsb-input"
+                      value={excludeInput}
+                      onChange={(e) => onSettingsFieldChange('exclude', e.target.value)}
+                      placeholder="*cache*, *.tmp"
+                    />
+                    <span className="dsb-hint">{t('settingsExcludeHint')}</span>
+                  </dd>
+                </dl>
+                <div className="dsb-row" style={{ marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    className="dsb-btn-primary"
+                    disabled={!settingsDirty || settingsStatus === 'saving'}
+                    onClick={saveSettings}
+                  >
+                    {settingsStatus === 'saving' ? t('busy') : t('save')}
+                  </button>
+                  <button
+                    type="button"
+                    className="dsb-btn-secondary"
+                    disabled={!hasOverrides || settingsStatus === 'saving'}
+                    onClick={resetSettings}
+                  >
+                    {t('reset')}
+                  </button>
+                  {settingsStatus === 'saved' ? (
+                    <span className="dsb-status-ok">{t('settingsSaved')}</span>
+                  ) : null}
+                  {settingsStatus === 'error' ? (
+                    <span className="dsb-status-error">{settingsMsg}</span>
+                  ) : null}
+                </div>
+                <p className="dsb-hint" style={{ marginTop: '6px' }}>{t('settingsSourceHint')}</p>
+              </>
+            ) : null}
             <div className="dsb-divider" />
             <div className="dsb-row">
               {snap.autoHours > 0 ? (
