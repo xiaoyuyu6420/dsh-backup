@@ -1,0 +1,75 @@
+name: Host compat
+
+# 每日追新巡检：装最新 @deepseek-ai/dsh 宿主 + 本仓库 main，跑真实宿主 e2e。
+# 红 → 自动开/更新带 host-compat 标签的 issue；恢复绿 → 自动关闭对应 issue。
+# issue 列表即兼容性健康日志；上游由每日 ZCode 巡检盯本 workflow 是否按时运行。
+
+on:
+  schedule:
+    - cron: '0 22 * * *' # UTC 22:00 = 北京时间 06:00
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: host-compat
+  cancel-in-progress: false
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: Install latest dsh host
+        run: npm i -g @deepseek-ai/dsh@latest
+
+      # 本 job 的职责就是追新：显式豁免 pnpm 默认 24h 冷却期，
+      # 否则新列车发布后 24h 内本巡检必然红（与日常 CI 的默认防线不冲突）。
+      - name: Run isolated-host e2e against latest train
+        env:
+          npm_config_minimum_release_age: 0
+          npm_config_minimumReleaseAge: 0
+        run: node scripts/e2e-host.mjs
+
+      - name: Open or update issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(cat <<'EOF'
+          Host compat e2e failed against the latest `@deepseek-ai/dsh`.
+
+          - Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Time: ${{ github.event.head_commit.timestamp || github.run_started_at }}
+
+          Likely causes: new rc train broke peer ranges (`^0.1.x-rc.n` semver prerelease trap), client preload contract change, or settings/webserver API drift. See docs/compatibility.md for the upgrade SOP.
+          EOF
+          )
+          NUMBERS=$(gh issue list -R "$GITHUB_REPOSITORY" --label host-compat --state open --json number --jq '.[].number')
+          FIRST=$(echo "$NUMBERS" | head -1)
+          if [ -n "$FIRST" ]; then
+            gh issue comment "$FIRST" --body "$BODY"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --label host-compat \
+              --title "Host compat broken: latest @deepseek-ai/dsh fails e2e" --body "$BODY"
+          fi
+
+      - name: Close issues on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list -R "$GITHUB_REPOSITORY" --label host-compat --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Recovered: latest-train e2e passed in run ${{ github.run_id }}."
+          done
