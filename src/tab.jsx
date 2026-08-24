@@ -4,7 +4,7 @@
  * 全部动作经注入的 panel API 走 `backupPanel` Remote，组件自身只持有视图状态。
  */
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 /** 从归档名解析展示时间：dsh-YYYYMMDD-HHMMSSmmm → YYYY-MM-DD HH:MM:SS。 */
 function stampOf(name) {
@@ -41,7 +41,6 @@ export function BackupTab({ panel, t }) {
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState(''); // '' | 'saving' | 'saved' | 'error'
   const [settingsMsg, setSettingsMsg] = useState('');
-  const settingsDirtyRef = useRef(false);
 
   const reload = () => { setRequest(v => v + 1); };
 
@@ -51,9 +50,8 @@ export function BackupTab({ panel, t }) {
     setSettingsRevision(data.revision);
     setHasOverrides(!!data.hasOverrides);
     setDestInput(data.destination || '');
-    setKeepInput(String(data.keep ?? 7));
+    setKeepInput(data.keep > 0 ? String(data.keep) : '');
     setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
-    settingsDirtyRef.current = false;
     setSettingsDirty(false);
   };
 
@@ -147,7 +145,7 @@ export function BackupTab({ panel, t }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           destination: destInput.trim(),
-          keep: Number.isFinite(keep) && keep >= 1 ? Math.floor(keep) : 7,
+          keep: Number.isFinite(keep) && keep >= 1 ? Math.floor(keep) : 0,
           exclude,
           revision: settingsRevision,
         }),
@@ -208,7 +206,6 @@ export function BackupTab({ panel, t }) {
   };
 
   const onSettingsFieldChange = (field, value) => {
-    settingsDirtyRef.current = true;
     setSettingsDirty(true);
     setSettingsStatus('');
     setSettingsMsg('');
