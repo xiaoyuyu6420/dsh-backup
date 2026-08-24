@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      # 不豁免 minimumReleaseAge：保持 pnpm 默认 24h 供应链冷却期。
+      # 追新 rc 列车导致本 job 红 CI 时，等列车满 24h 即可（见 docs/compatibility.md SOP）。
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Rebuild client bundle and check it is in sync
+        run: |
+          node scripts/build-client.mjs
+          git diff --exit-code lib/client.js || {
+            echo "::error::lib/client.js 与 src/ 不同步——请运行 node scripts/build-client.mjs 并提交产物";
+            exit 1;
+          }
+
+      - name: Host smoke suite
+        run: node scripts/smoke.mjs
+
+      - name: Client smoke suite
+        run: node scripts/smoke-client.mjs
