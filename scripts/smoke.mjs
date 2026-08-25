@@ -17,7 +17,9 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { gzipSync, zstdCompressSync } from 'node:zlib';
+// 命名空间导入：zstd 系导出在 Node <22.15/23.8 不存在，具名导入会让整个
+// 套件加载失败——套件本身要能跨运行时启动才能测插件的降级路径。
+import * as zlib from 'node:zlib';
 
 const IS_WIN = process.platform === 'win32';
 let failures = 0;
@@ -228,7 +230,7 @@ function makeTarGz(entries) {
     if (pad) blocks.push(Buffer.alloc(pad));
   }
   blocks.push(Buffer.alloc(512), Buffer.alloc(512)); // 结尾两个零块
-  return gzipSync(Buffer.concat(blocks));
+  return zlib.gzipSync(Buffer.concat(blocks));
 }
 
 /**
@@ -244,11 +246,15 @@ function makeSessionLogLines(id) {
 }
 
 function makeZstdSessionLog(id) {
+  // 无 zstd 运行时（Node <22.15/23.8）：内容无所谓——体检对这些文件走 skipped
+  if (typeof zlib.zstdCompressSync !== 'function') {
+    return Buffer.from(`placeholder-zstd-log-${id}`);
+  }
   // 三帧：header / 裸事件两行 / packed 行 + 后续裸事件
   return Buffer.concat([
-    zstdCompressSync(`${makeSessionLogLines(id).slice(0, 1).join('\n')}\n`),
-    zstdCompressSync(`${makeSessionLogLines(id).slice(1, 3).join('\n')}\n`),
-    zstdCompressSync(`${makeSessionLogLines(id).slice(3).join('\n')}\n`),
+    zlib.zstdCompressSync(`${makeSessionLogLines(id).slice(0, 1).join('\n')}\n`),
+    zlib.zstdCompressSync(`${makeSessionLogLines(id).slice(1, 3).join('\n')}\n`),
+    zlib.zstdCompressSync(`${makeSessionLogLines(id).slice(3).join('\n')}\n`),
   ]);
 }
 
@@ -802,26 +808,41 @@ async function main() {
         );
 
         const scan = await mock20.tool().execute({ mode: 'doctor' }, {});
+        // 运行时自适应：Node ≥22.15/23.8 才有内置 zstd 解码。有 → 3 个损坏全检出；
+        // 无（如 Node 20）→ zstd 文件进 skipped、只有 raw 跳号可检出——这正是
+        // HAS_NODE_ZSTD 降级路径的实测。
+        const { zstdDecompressSync: probe } = await import('node:zlib');
+        const zstdOk = typeof probe === 'function';
+        const expectBad = zstdOk ? 3 : 1;
         const dump = scan.corrupt.map((c) => `${c.path} ← ${c.reason}`).join(' | ');
-        ok(scan.ok === false && scan.corruptCount === 3, `扫描检出 3 个损坏（实际 ${scan.corruptCount}）`);
-        ok(scan.corrupt.some((c) => c.path.includes('enc-magic')), `坏魔数检出: ${dump}`);
-        ok(scan.corrupt.some((c) => c.path.includes('enc-trunc')), '截断帧检出');
+        ok(scan.ok === false && scan.corruptCount === expectBad, `扫描检出 ${expectBad} 个损坏（实际 ${scan.corruptCount}）`);
+        if (zstdOk) {
+          ok(scan.corrupt.some((c) => c.path.includes('enc-magic')), `坏魔数检出: ${dump}`);
+          ok(scan.corrupt.some((c) => c.path.includes('enc-trunc')), '截断帧检出');
+        } else {
+          ok(scan.skippedCount === 3, `无 zstd 运行时：3 个 .zstd 全部标记 skipped 而非损坏（实际 ${scan.skippedCount}）`);
+          ok(scan.corrupt.every((c) => !c.path.endsWith('.zstd')), `损坏清单只含 raw 文件: ${dump}`);
+          ok(scan.summary.includes('未能深度校验'), '扫描汇总提示 skipped');
+        }
         ok(scan.corrupt.some((c) => c.path.includes('raw-gap') && c.reason.includes('期望 1')), 'seq 跳号检出');
         ok(!scan.corrupt.some((c) => c.path.includes('-good')), `健康文件零误报: ${dump}`);
 
         const cmdScan = await mock20.handler('doctor');
         ok(cmdScan.kind === 'error' && cmdScan.text.includes('/backup doctor --repair'), '命令面 doctor 报告损坏并提示修复用法');
 
+        const repairTargets = zstdOk ? ['enc-magic', 'enc-trunc', 'raw-gap'] : ['raw-gap'];
         const repair = await mock20.tool().execute({ mode: 'doctor', selector: 'latest', repair: true }, {});
-        ok(repair.ok === true && repair.repaired.length === 3, `定点修复 3 个（实际 ${repair.repaired.length}）`);
-        ok(await fs.readFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd')).then((b) => b.equals(good)), '坏魔数文件已还原为健康字节');
+        ok(repair.ok === true && repair.repaired.length === expectBad, `定点修复 ${expectBad} 个（实际 ${repair.repaired.length}）`);
+        if (zstdOk) {
+          ok(await fs.readFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd')).then((b) => b.equals(good)), '坏魔数文件已还原为健康字节');
+        }
         ok(await fs.readFile(path.join(sessDir, 'raw-gap', 'session.jsonl'), 'utf8').then((t) => t === rawGood.toString('utf8')), 'seq 跳号文件已还原');
         let keptCount = 0;
-        for (const [dirName] of [['enc-magic'], ['enc-trunc'], ['raw-gap']]) {
+        for (const dirName of repairTargets) {
           const names = await fs.readdir(path.join(sessDir, dirName));
           keptCount += names.filter((n) => n.includes('.corrupt-')).length;
         }
-        ok(keptCount === 3, `损坏现场留档 *.corrupt-* ×3（实际 ${keptCount}）`);
+        ok(keptCount === expectBad, `损坏现场留档 *.corrupt-* ×${expectBad}（实际 ${keptCount}）`);
 
         const rescanCmd = await mock20.handler('doctor');
         ok(rescanCmd.kind === 'success', `修复后复扫全绿: ${rescanCmd.kind === 'error' ? rescanCmd.text.split('\n')[0] : ''}`);
