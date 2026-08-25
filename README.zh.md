@@ -42,6 +42,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 | 恢复 | `/backup restore latest`（`--dry-run` 先预览） |
 | 列出备份 | `/backup list` |
 | 校验是否完好 | `/backup verify [前缀\|all]` |
+| 会话日志体检/修复 | `/backup doctor`（`--repair [前缀\|latest]` 从备份定点修复） |
 | 删除某份备份 | `/backup delete <前缀\|latest>` |
 | 保留份数（默认 7） | `/backup --keep N` |
 
