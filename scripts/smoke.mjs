@@ -660,13 +660,13 @@ async function main() {
         // 恢复（本机）：vault 自动还原凭据
         await fs.rm(env16.dsh, { recursive: true, force: true });
         const r16r = await mock16.handler('restore latest');
-        ok(r16r.kind === 'success' && r16r.text.includes('vault 已还原'), `恢复后 vault 自动还原: ${r16r.text.split('\n').filter((l) => l.includes('vault')).join(' ')}`);
+        ok(r16r.kind === 'success' && r16r.text.includes('已从本机 vault 补回'), `恢复后 vault 自动还原: ${r16r.text.split('\n').filter((l) => l.includes('vault')).join(' ')}`);
         ok(await fs.readFile(`${env16.dsh}/.credentials.yaml`, 'utf8').then((t) => t === 'api-key: secret', () => false), '~/.dsh 凭据从 vault 还原（内容一致）');
         // 跨机模拟：vault 清空后恢复 → 提示重填而非静默缺失
         await fs.rm(env16.dsh, { recursive: true, force: true });
         await fs.rm(`${env16.root}/vault`, { recursive: true, force: true });
         const r16x = await mock16.handler('restore latest');
-        ok(r16x.kind === 'success' && r16x.text.includes('需重填') && r16x.text.includes('.credentials.yaml'), `跨机恢复提示重填: ${r16x.text.split('\n').filter((l) => l.includes('重填')).join(' ')}`);
+        ok(r16x.kind === 'success' && r16x.text.includes('重填') && r16x.text.includes('.credentials.yaml'), `跨机恢复提示重填: ${r16x.text.split('\n').filter((l) => l.includes('重填')).join(' ')}`);
       } finally {
         await fs.rm(env16.dir, { recursive: true, force: true });
       }

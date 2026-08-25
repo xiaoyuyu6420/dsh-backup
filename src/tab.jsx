@@ -111,13 +111,29 @@ export function BackupTab({ panel, t }) {
     void run(`delete:${name}`, () => panel.removeEntry(name)).then(reload);
   };
 
-  const previewRestore = (name) => {
+  // 预览刻意不走 run()：dry-run 的 summary 已由弹窗承载，再落横幅会重复。
+  const previewRestore = async (name) => {
     setPending(null);
-    void run(`restore:${name}`, async () => {
+    setBusy(`restore:${name}`);
+    try {
       const r = await panel.restore(name, true);
-      if (r.ok) setPending({ name, files: r.files, sample: r.sample || [] });
-      return r;
-    });
+      if (r.ok) {
+        setBanner(null);
+        setPending({
+          name,
+          files: r.files,
+          sample: r.sample || [],
+          preflight: r.preflight ?? [],
+          targetExists: r.targetExists,
+        });
+      } else {
+        setBanner({ ok: false, text: r.summary || t('error') });
+      }
+    } catch (err) {
+      setBanner({ ok: false, text: String(err && err.message ? err.message : err) });
+    } finally {
+      setBusy('');
+    }
   };
 
   const confirmRestore = () => {
@@ -125,6 +141,14 @@ export function BackupTab({ panel, t }) {
     setPending(null);
     void run(`restore:${target.name}`, () => panel.restore(target.name, false)).then(reload);
   };
+
+  // 确认弹窗打开时 Esc 取消；恢复执行中（busy）不响应，避免误关丢反馈。
+  useEffect(() => {
+    if (pending === null) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape' && busy === '') setPending(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pending, busy]);
 
   const downloadHref = (name) => (
     typeof window !== 'undefined' && window.location
@@ -405,17 +429,39 @@ export function BackupTab({ panel, t }) {
           ) : null}
 
           {pending !== null ? (
-            <div className="dsb-preview">
-              <strong>{t('restorePreviewTitle')} — {pending.name} · {t('restoreEntries').replace('{n}', String(pending.files))}</strong>
-              <ul>{pending.sample.slice(0, 10).map((s) => <li key={s}>{s}</li>)}</ul>
-              <p className="dsb-status">{t('restartHint')}</p>
-              <div className="dsb-row">
-                <button type="button" className="dsb-btn-danger" disabled={busy !== ''} onClick={confirmRestore}>
-                  {t('confirmRestore')}
-                </button>
-                <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={() => setPending(null)}>
-                  {t('cancel')}
-                </button>
+            <div className="dsb-modal-backdrop" role="presentation" onClick={() => { if (busy === '') setPending(null); }}>
+              <div
+                className="dsb-modal"
+                role="alertdialog"
+                aria-modal="true"
+                aria-label={t('restoreConfirmTitle')}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <strong className="dsb-modal-title">{t('restoreConfirmTitle')}</strong>
+                <p className="dsb-modal-sub">{pending.name} · {t('restoreEntries').replace('{n}', String(pending.files))}</p>
+                <div className="dsb-warn">
+                  <p>{t('restoreWarnTitle')}</p>
+                  <ul>
+                    {(pending.targetExists === false
+                      ? [t('restoreWhatFresh')]
+                      : [t('restoreWhatMove'), t('restoreWhatSnapshot'), t('restoreWhatWrite')]
+                    ).map((s) => <li key={s}>{s}</li>)}
+                  </ul>
+                </div>
+                {pending.preflight.length > 0 ? (
+                  <ul className="dsb-preflight">
+                    {pending.preflight.map((s) => <li key={s}>{s}</li>)}
+                  </ul>
+                ) : null}
+                <p className="dsb-status">{t('restartHint')}</p>
+                <div className="dsb-row dsb-modal-actions">
+                  <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={() => setPending(null)}>
+                    {t('cancel')}
+                  </button>
+                  <button type="button" className="dsb-btn-danger-solid" disabled={busy !== ''} onClick={confirmRestore}>
+                    {busy === `restore:${pending.name}` ? t('busy') : t('confirmRestore')}
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
