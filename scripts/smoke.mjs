@@ -796,7 +796,6 @@ async function main() {
         // 弄坏三个现场：坏魔数 / 截断帧 / seq 跳号
         await fs.writeFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd'), Buffer.from('definitely not zstd output!!'));
         await fs.writeFile(path.join(sessDir, 'enc-trunc', 'session.jsonl.zstd'), good.subarray(0, good.length - 4));
-        await fs.writeFile(path.join(sessDir, 'raw-gap', 'session.json'), '');
         await fs.writeFile(
           path.join(sessDir, 'raw-gap', 'session.jsonl'),
           [makeSessionLogLines('x')[0], JSON.stringify({ type: 'user/message', seq: 0 }), JSON.stringify({ type: 'user/message', seq: 2 })].join('\n'),
@@ -867,7 +866,7 @@ async function main() {
         await fs.rm(env22.dsh, { recursive: true, force: true });
         const res22 = await mock22.handler('restore latest');
         ok(res22.kind === 'success', `目标缺失时恢复成功: ${res22.kind === 'success' ? '' : res22.text}`);
-        ok(!res22.text.includes('恢复前快照') && !res22.text.includes('旧数据已移至'), '无现有数据时不快照、不 aside');
+        ok(!res22.text.includes('旧数据没丢') && !res22.text.includes('保险快照'), '无现有数据时不快照、不 aside');
         ok(await fs.readFile(path.join(env22.dsh, 'settings.json'), 'utf8') === '{"a":1}', '数据已解回 ~/.dsh');
         ok(await fs.readFile(path.join(env22.dsh, '.credentials.yaml'), 'utf8').then(() => true, () => false), '凭据从 vault 自动还原');
       } finally {
