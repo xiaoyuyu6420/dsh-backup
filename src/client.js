@@ -63,6 +63,9 @@ const restoreSchema = z.object({
   aside: z.string().nullable().optional(),
   snapshotPath: z.string().nullable().optional(),
   sample: z.array(z.string()).optional(),
+  // 恢复预检提示（🔐凭据/📦依赖/⚠️跨机）与目标是否已有数据——预览弹窗渲染用
+  preflight: z.array(z.string()).optional(),
+  targetExists: z.boolean().nullable().optional(),
 });
 
 const setAutoSchema = z.object({

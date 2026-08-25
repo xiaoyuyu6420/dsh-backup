@@ -258,28 +258,81 @@ const PANEL_CSS = `
   color: var(--dsw-alias-label-error);
 }
 
-/* ── 恢复预览 ─────────────────────────────────────────── */
-[data-dsh-backup] .dsb-preview {
+/* ── 恢复确认弹窗 ─────────────────────────────────────── */
+[data-dsh-backup] .dsb-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--dsw-alias-label-primary) 30%, transparent);
+}
+[data-dsh-backup] .dsb-modal {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px dashed var(--dsw-alias-border-l2);
-  border-radius: 10px;
+  gap: 10px;
+  width: min(500px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 18px 20px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
   background: var(--dsw-alias-bg-layer-2);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 28%);
   font-size: 13px;
 }
-[data-dsh-backup] .dsb-preview strong {
+[data-dsh-backup] .dsb-modal-title {
+  font-size: 15px;
   font-weight: 600;
 }
-[data-dsh-backup] .dsb-preview ul {
+[data-dsh-backup] .dsb-modal-sub {
   margin: 0;
-  padding-left: 1.2em;
-  color: var(--dsw-alias-label-secondary);
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
   font-size: 12px;
-  max-height: 10em;
-  overflow: auto;
+  word-break: break-all;
+  color: var(--dsw-alias-label-tertiary);
+}
+[data-dsh-backup] .dsb-warn {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--dsw-alias-label-error) 45%, transparent);
+  border-radius: 10px;
+}
+[data-dsh-backup] .dsb-warn p {
+  margin: 0 0 6px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-error);
+}
+[data-dsh-backup] .dsb-warn ul {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--dsw-alias-label-primary);
+}
+[data-dsh-backup] .dsb-preflight {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+}
+[data-dsh-backup] .dsb-modal-actions {
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+[data-dsh-backup] .dsb-btn-danger-solid {
+  background: var(--dsw-alias-label-error);
+  color: #fff;
+}
+[data-dsh-backup] .dsb-btn-danger-solid:hover:not(:disabled) {
+  filter: brightness(1.06);
 }
 
 /* ── 设置输入框 ────────────────────────────────────────── */
