@@ -11,7 +11,11 @@
 
 会话记录、设置、技能、插件配置全在 `~/.dsh` 一个目录里。误删了、改坏了、换电脑了——有备份就能找回来。密码等敏感文件不进备份包，还支持定时自动备份和 GitHub 云同步（细节见[进阶文档](docs/advanced.zh.md)）。
 
+最近的更新：**0.8.0** 可以在面板里直接改备份设置（备份目录、保留份数、排除模式），保存立即生效、写入 settings.yaml，不用重启；两处同时改会产生冲突提示，不会静默覆盖。**0.7.x** 新增了凭据脱敏（本机 vault）和跨机恢复。
+
 ## 安装
+
+包发布在 [npm](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup) 上，装进 DSH profile 用：
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
@@ -41,7 +45,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 | 删除某份备份 | `/backup delete <前缀\|latest>` |
 | 保留份数（默认 7） | `/backup --keep N` |
 
-不想敲命令？`dsh web` 设置里有可视化面板。
+不敲命令也行：`dsh web` → 设置 → 插件 → 备份 里有可视化面板——列备份、校验/恢复/删除，0.8.0 起还能直接改备份设置（目录、保留份数、排除模式），立即生效不用重启。
 
 ## 换新电脑
 
