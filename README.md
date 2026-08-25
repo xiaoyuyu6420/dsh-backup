@@ -11,7 +11,11 @@ English | [简体中文](README.zh.md)
 
 Sessions, settings, skills, and plugin config all live in `~/.dsh`. Delete it by accident, break a config, or move to a new machine — with a backup, you get it all back. Credentials never enter an archive; scheduled backups and GitHub sync are supported (details in the [advanced guide](docs/advanced.zh.md), Chinese).
 
+Recent additions: **0.8.0** can edit backup settings right in the panel (destination, retention, exclude patterns) — saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of being silently overwritten. **0.7.x** added credential redaction with a local vault and cross-machine restore.
+
 ## Install
+
+The package is published on [npm](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup); install it into a DSH profile with:
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
@@ -41,7 +45,7 @@ Want it on a schedule? `/backup auto 12` — every 12 hours, keeps going across 
 | Delete | `/backup delete <prefix\|latest>` |
 | Keep N copies (default 7) | `/backup --keep N` |
 
-Prefer clicking? There's a visual panel in `dsh web` settings.
+There's a visual panel in `dsh web` → Settings → Plugins → Backup: it lists backups, runs verify/restore/delete, and — since 0.8.0 — edits the backup settings (destination, retention, exclude patterns) directly, applied immediately, no restart.
 
 ## New machine
 
