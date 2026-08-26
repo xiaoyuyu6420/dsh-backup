@@ -44,7 +44,11 @@
     "恢复",
     "schedule",
     "自动备份",
-    "cross-platform"
+    "cross-platform",
+    "rescue",
+    "doctor",
+    "upgrade-snapshot",
+    "数据安全"
   ],
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
