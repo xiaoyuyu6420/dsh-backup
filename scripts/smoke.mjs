@@ -12,7 +12,7 @@
  *
  * 用法：node scripts/smoke.mjs
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -892,6 +892,74 @@ async function main() {
         ok(await fs.readFile(path.join(env22.dsh, '.credentials.yaml'), 'utf8').then(() => true, () => false), '凭据从 vault 自动还原');
       } finally {
         await fs.rm(env22.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('23) 救援通道：进程外 rescue.mjs 实弹（CLI + webui HTTP）');
+    {
+      const env23 = await mkTmpHome();
+      try {
+        const mock23 = makeCtx({ home: env23.home, dsh: env23.dsh });
+        plugin(mock23.ctx, {});
+        const sessDir = path.join(env23.dsh, 'sessions', '--proj--');
+        const good = makeZstdSessionLog('sess-r');
+        const rawLines = makeSessionLogLines('sess-raw');
+        const rawGood = Buffer.from(rawLines.slice(0, 3).join('\n'), 'utf8');
+        await fs.mkdir(path.join(sessDir, 'enc-a'), { recursive: true });
+        await fs.writeFile(path.join(sessDir, 'enc-a', 'session.jsonl.zstd'), good);
+        await fs.mkdir(path.join(sessDir, 'raw-b'), { recursive: true });
+        await fs.writeFile(path.join(sessDir, 'raw-b', 'session.jsonl'), rawGood);
+        await mock23.handler('');
+
+        const rescueFile = path.join(env23.root, 'rescue.mjs');
+        ok(await fs.stat(rescueFile).then(() => true, () => false), 'rescue.mjs 已随备份落盘');
+        ok(await fs.readFile(path.join(env23.root, 'RESCUE.txt'), 'utf8').then((t) => t.includes('双击'), () => false), 'RESCUE.txt 引导双击');
+        const launcherName = process.platform === 'win32' ? '点我恢复.bat' : process.platform === 'darwin' ? '点我恢复.command' : '点我恢复.sh';
+        ok(await fs.stat(path.join(env23.root, launcherName)).then(() => true, () => false), `双击启动器已生成（${launcherName}）`);
+
+        const r = (args) => spawnSync(process.execPath, [rescueFile, ...args], { encoding: 'utf8', timeout: 120_000, env: { ...process.env, DSH_HOME: env23.dsh } });
+        const list = r(['list']);
+        ok(list.status === 0 && list.stdout.includes('dsh-'), `rescue list: ${(list.stdout || list.stderr).split('\n')[0]}`);
+        const ver = r(['verify']);
+        ok(ver.status === 0 && ver.stdout.includes('✅'), 'rescue verify 通过');
+
+        // webui HTTP：页面可访问、缺自定义头的写操作被 403（CSRF 防御）
+        const srv = spawn(process.execPath, [rescueFile, 'serve', '--port', '13197'], { env: { ...process.env, DSH_HOME: env23.dsh }, stdio: 'ignore' });
+        try {
+          let up = false;
+          for (let i = 0; i < 24 && !up; i++) {
+            await new Promise((rr) => setTimeout(rr, 250));
+            up = await fetch('http://127.0.0.1:13197/').then((x) => x.ok).catch(() => false);
+          }
+          ok(up, '救援网页 serve 启动并响应');
+          if (up) {
+            const page = await fetch('http://127.0.0.1:13197/').then((x) => x.text());
+            ok(page.includes('dsh-rescue') && page.includes('恢复'), '页面渲染（标题/恢复入口）');
+            const noHdr = await fetch('http://127.0.0.1:13197/api/list', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            ok(noHdr.status === 403, `缺自定义头的 POST 被拒（实际 ${noHdr.status}）`);
+            const withHdr = await fetch('http://127.0.0.1:13197/api/list', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dsh-Rescue': '1' }, body: '{}' }).then((x) => x.json());
+            ok(withHdr.ok === true && Array.isArray(withHdr.backups), 'API list 正常返回备份');
+          }
+        } finally {
+          srv.kill();
+        }
+
+        // doctor：弄坏 raw 文件 → rescue 检出并定点修复
+        await fs.writeFile(path.join(sessDir, 'raw-b', 'session.jsonl'), [rawLines[0], JSON.stringify({ type: 'user/message', seq: 0 }), JSON.stringify({ type: 'user/message', seq: 5 })].join('\n'));
+        const doc = r(['doctor']);
+        ok(doc.status === 1 && doc.stdout.includes('raw-b'), `rescue doctor 检出损坏: ${(doc.stdout.match(/❌[^\n]*/) || ['(无)']).join(' ')}`);
+        const rep = r(['doctor', '--repair']);
+        ok(rep.status === 0 && rep.stdout.includes('复检全部健康'), `rescue doctor --repair: ${(rep.stdout || rep.stderr).split('\n')[0]}`);
+        ok(await fs.readFile(path.join(sessDir, 'raw-b', 'session.jsonl'), 'utf8').then((t) => t === rawGood.toString('utf8')), 'rescue 修复后字节一致');
+
+        // 空目标机恢复：整个 .dsh 删掉，rescue 独立拉回（vault 凭据还原）
+        await fs.rm(env23.dsh, { recursive: true, force: true });
+        const res = r(['restore', 'latest', '--yes']);
+        ok(res.status === 0 && res.stdout.includes('恢复完成'), `rescue restore --yes: ${(res.stdout || res.stderr).split('\n').slice(0, 2).join(' | ')}`);
+        ok(await fs.readFile(path.join(env23.dsh, 'settings.json'), 'utf8') === '{"a":1}', 'rescue 恢复出 settings.json');
+        ok(await fs.readFile(path.join(env23.dsh, '.credentials.yaml'), 'utf8').then(() => true, () => false), 'rescue 从 vault 还原凭据');
+      } finally {
+        await fs.rm(env23.dir, { recursive: true, force: true });
       }
     }
 

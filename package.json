@@ -12,11 +12,15 @@
   },
   "files": [
     "lib",
+    "rescue",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
     "LICENSE"
   ],
+  "bin": {
+    "dsh-rescue": "./rescue/rescue.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
