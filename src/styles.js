@@ -237,6 +237,16 @@ const PANEL_CSS = `
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* ── 反馈入口 ─────────────────────────────────────────── */
+[data-dsh-backup] .dsb-feedback {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+[data-dsh-backup] .dsb-feedback a {
+  color: var(--dsh-backup-accent, var(--dsw-alias-label-primary));
+}
+
 /* ── 结果横幅 ─────────────────────────────────────────── */
 [data-dsh-backup] .dsb-banner {
   margin: 0;
