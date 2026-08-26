@@ -149,7 +149,10 @@ function makeCtx({ home, dsh, env }) {
       timeouts.push({ fn, ms });
       return () => {};
     },
-    // cordis Context.inject 的桩：typert / webServer 存在时立即激活作用域回调。
+    // cordis Context.inject 的桩：typert / webServer / settings 存在时立即激活
+    // 作用域回调。settings 桩模拟"已装载"状态（describe 立即给出 revision），
+    // 让启动钩子的 waitForSettingsReady 第一拍就通过——与真实 Web profile 的
+    // 稳态一致；headless 无 settings 的慢路径由 cap 兜底。
     inject: (names, callback) => {
       if (names.includes('typert')) {
         const scope = {
@@ -163,6 +166,21 @@ function makeCtx({ home, dsh, env }) {
         const scope = {
           webServer: { register: (route) => { routes.push(route); return () => {}; } },
           effect: (fn) => { const dispose = fn(); return () => dispose?.(); },
+        };
+        callback(scope);
+      }
+      if (names.includes('settings')) {
+        // 模拟真实 settings 服务的合并语义：register 收到的 base 即
+        // resolveBase(pluginConfig)，describe.value 返回合并结果——否则
+        // value:{} 会遮蔽 pluginConfig（githubRepo/keep 等全部丢失）
+        let registeredBase = {};
+        const scope = {
+          settings: {
+            register: (_ns, _schema, opts) => { registeredBase = (opts && opts.base) || {}; },
+            update: () => {},
+            replace: () => {},
+            describe: () => [{ ns: 'dsh-backup', revision: 0, value: { ...registeredBase } }],
+          },
         };
         callback(scope);
       }
@@ -973,6 +991,10 @@ async function main() {
         // ---- B1 升级前快照：首见列车只记录；篡改 lastTrain 后重启触发 ----
         const mock24 = makeCtx({ home: env24.home, dsh: env24.dsh });
         plugin(mock24.ctx, {});
+        // 二次备份压轴：首备份的落盘可能与钩子的"列车记录"乱序到达（原子写
+        // last-wins），再备一次让其以赋值后的闭包状态收尾——终态确定可断言
+        await mock24.handler('');
+        await new Promise((rr) => setTimeout(rr, 60));
         await mock24.handler('');
         const pre0 = (await fs.readdir(env24.root)).filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz'));
         ok(pre0.length === 0, '首次启动只记录列车，不拍升级快照');
@@ -985,7 +1007,7 @@ async function main() {
             auto1 = JSON.parse(await fs.readFile(autoPath, 'utf8'));
           } catch { /* 尚未落盘 */ }
         }
-        ok(auto1 && typeof auto1.lastTrain === 'string' && auto1.lastTrain, 'auto.json 已记录宿主列车');
+        ok(auto1 && typeof auto1.lastTrain === 'string' && auto1.lastTrain, `auto.json 已记录宿主列车: ${JSON.stringify(auto1)}`);
         await fs.writeFile(autoPath, JSON.stringify({ ...auto1, lastTrain: '0.0.1-test-old' }));
         plugin(makeCtx({ home: env24.home, dsh: env24.dsh }).ctx, {});
         let preUpgrade = [];
@@ -999,6 +1021,23 @@ async function main() {
         ok(!(await listArchives(env24.root)).some((n) => n.startsWith('dsh-pre-upgrade-')), '用户备份列表不含内部快照');
         const preRestore24 = await mock24.handler(`restore ${preUpgrade[0].replace('.tar.gz', '')} --dry-run`);
         ok(preRestore24.kind === 'success' && preRestore24.text.includes('恢复预览'), '显式前缀可选中升级前快照');
+        if (auto1 && typeof auto1.lastTrain === 'string') {
+          // 再触发两次列车变化：快照最多保留最近 2 份
+          const trainReal = auto1.lastTrain;
+          for (const fake of ['0.0.2-test-old', '0.0.3-test-old']) {
+            const aObj = JSON.parse(await fs.readFile(autoPath, 'utf8'));
+            await fs.writeFile(autoPath, JSON.stringify({ ...aObj, lastTrain: fake }));
+            plugin(makeCtx({ home: env24.home, dsh: env24.dsh }).ctx, {});
+            for (let i = 0; i < 40; i += 1) {
+              await new Promise((rr) => setTimeout(rr, 250));
+              try {
+                if (JSON.parse(await fs.readFile(autoPath, 'utf8')).lastTrain === trainReal) break;
+              } catch { /* 等待落盘 */ }
+            }
+          }
+          const preAll = (await fs.readdir(env24.root)).filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz'));
+          ok(preAll.length === 2, `升级前快照至多保留 2 份（实际 ${preAll.length}）`);
+        }
 
         // ---- B2 备份前体检联动：坏会话不入档 + meta 记录 + 恢复预检提示 ----
         const sessDir = path.join(env24.dsh, 'sessions', '--proj--');
