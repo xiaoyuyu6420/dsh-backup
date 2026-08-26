@@ -515,6 +515,17 @@ export function BackupTab({ panel, t }) {
               </ul>
             )}
           </div>
+
+          <p className="dsb-feedback">
+            {t('feedbackHint')}{' '}
+            <a
+              href="https://github.com/xiaoyuyu6420/dsh-backup/discussions/32"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t('feedbackLink')}
+            </a>
+          </p>
         </>
       ) : null}
     </div>
