@@ -3,6 +3,17 @@
 > 目标：**200 条真实用户反馈**。口径见 `scripts/feedback-count.sh`（排除作者与 bot；一条 issue/评论/回复 = 一条反馈）。
 > 本页由巡检自动更新，最新战况永远在最上面。
 
+## 2026-08-26 21:25 — 第三轮：dsh.so 投稿 + 发版就绪 + 重名发现
+
+**5 / 200**（渠道铺完约 1 小时，等待真实用户响应；npm 周下载基线 1542）
+
+新增动作：
+
+8. dsh.so 插件市场投稿：[ihuajiu/dsh-plugin-submissions#57](https://github.com/ihuajiu/dsh-plugin-submissions/issues/57)（security 类；24h 内 L1-L2 评审；出详情页后回填 dshoneys #19 清 needs-info）
+9. 发版 staging 完成：PR #37 已合 main（版本 0.9.1，含面板反馈入口 + 新 README 刷新 npm 页面）——**打 tag v0.9.1 即发布，等作者拍板**
+10. 官方帖 #4569（今日新报：PM2 重启双写损坏）应答，doctor 对口
+11. ⚠️ 发现重名插件：官方帖 #3539 有另一位社区作者也发布了叫 **dsh-backup** 的插件（zip 格式、8/20）。我们的差异点：tar.gz+sha256、doctor、救援通道、凭据脱敏、面板、GitHub 同步；npm 包名带 scope 不冲突，但搜索 "dsh-backup" 两个都会出现，后续宣传注意带 scope 名
+
 ## 2026-08-26 20:55 — 第二轮：精准需求帖应答 + profile 引流
 
 **5 / 200**（暂无新增，渠道刚铺完，等真实用户响应）
