@@ -42,6 +42,7 @@ Want it on a schedule? `/backup auto 12` — every 12 hours, keeps going across 
 | Restore | `/backup restore latest` (`--dry-run` to preview) |
 | List backups | `/backup list` |
 | Verify integrity | `/backup verify [prefix\|all]` |
+| Check & repair session logs | `/backup doctor` (`--repair [prefix\|latest]` to fix from a backup) |
 | Delete | `/backup delete <prefix\|latest>` |
 | Keep N copies (default 7) | `/backup --keep N` |
 

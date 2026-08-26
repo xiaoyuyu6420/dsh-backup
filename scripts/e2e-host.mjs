@@ -9,6 +9,8 @@
  *   1. cordis 全有或全无：boot 成功 + webserver HTTP 200 = 插件 peer/API 兼容
  *   2. 客户端列车陷阱：HTML 必须预加载官方 client 包（0.1.1-rc+ webserver 行为）
  *   3. settings seam：GET/POST/409/400/重启持久化/reset（<0.8.0 无此路由时自动跳过）
+ *   4. doctor RPC 往返：备份 → 弄坏会话日志 → 扫描检出 → 定点修复 → 复扫全绿；
+ *      老归档（删 meta/redacted 边车）dry-run 恢复静默降级
  *
  * 零依赖；退出码 0=全过，1=有失败。
  */
@@ -19,6 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { zstdCompressSync } from 'node:zlib';
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.E2E_PORT || 13131);
@@ -222,6 +225,83 @@ async function main() {
     check('reset 清空用户层回退默认值', reset.hasOverrides === false && reset.keep !== 5);
     const yamlAfterReset = fs.existsSync(yamlPath) ? fs.readFileSync(yamlPath, 'utf8') : '';
     check('reset 后 settings.yaml 用户层清空', /dsh-backup:\s*\{\}|dsh-backup:\s*$/.test(yamlAfterReset.trim().split('\n').find((l) => l.startsWith('dsh-backup')) ?? '') || !yamlAfterReset.includes('keep: 5'));
+  }
+
+  // ---------- doctor：体检/定点修复 RPC 往返 + 老归档静默降级 ----------
+  if (!seamPresent) {
+    console.log('  ⏭️  无 settings 路由（<0.8.0），跳过 doctor / 老归档断言');
+  } else {
+    const rpc = async (method, args = {}) => {
+      try {
+        const res = await fetch(`${BASE}/api/backupPanel/${method}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'client-request', rpcId: randomUUID(), method: `backupPanel/${method}`, payload: { args } }),
+        });
+        const json = JSON.parse(await res.text());
+        if (json?.type !== 'server-response') return { ok: false, raw: JSON.stringify(json).slice(0, 200) };
+        // typert 直接调用把返回值包在 result.value 里
+        return json.result?.value ?? json.result;
+      } catch (err) {
+        return { ok: false, raw: err.message };
+      }
+    };
+
+    // 备份目的地指进隔离 home，避免污染开发机真实的备份目录
+    const cur0 = await fetch(`${BASE}/dsh-backup/settings`).then((r) => r.json());
+    await fetch(`${BASE}/dsh-backup/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: cur0.revision, destination: path.join(home, 'bkdest') }),
+    }).then((r) => r.json());
+
+    // 会话日志布局对齐 @deepseek-ai/dsh-session-persistence-jsonl：
+    // 两份都先写健康内容 → 备份（归档持健康副本）→ 再弄坏一份现场
+    const sessRoot = path.join(home, 'sessions', '--e2e--');
+    const headerLine = JSON.stringify({ type: 'session', version: 0, id: 'sess-e2e', createdAt: '2026-08-25T00:00:00.000Z', delegationDepth: 0 });
+    const healthy = Buffer.concat([
+      zstdCompressSync(`${headerLine}\n`),
+      zstdCompressSync(`${JSON.stringify({ type: 'user/message', seq: 0 })}\n${JSON.stringify({ type: 'user/message', seq: 1 })}\n`),
+    ]);
+    for (const dirName of ['enc-good', 'enc-bad']) {
+      fs.mkdirSync(path.join(sessRoot, dirName), { recursive: true });
+      fs.writeFileSync(path.join(sessRoot, dirName, 'session.jsonl.zstd'), healthy);
+    }
+    const bk = await rpc('backup');
+    check('RPC backup 成功', bk?.ok === true, JSON.stringify(bk).slice(0, 160));
+    fs.writeFileSync(path.join(sessRoot, 'enc-bad', 'session.jsonl.zstd'), Buffer.from('corrupt payload, not zstd'));
+
+    const scan = await rpc('doctorScan');
+    check(
+      'RPC doctorScan 检出损坏会话日志',
+      scan?.ok === false && scan?.corruptCount === 1 && String(scan?.corrupt?.[0]?.path).includes('enc-bad'),
+      JSON.stringify(scan).slice(0, 200),
+    );
+
+    const repair = await rpc('doctorRepair', { selector: 'latest' });
+    let repairedBytesOk = false;
+    try {
+      repairedBytesOk = fs.readFileSync(path.join(sessRoot, 'enc-bad', 'session.jsonl.zstd')).equals(healthy);
+    } catch { /* 文件缺失视为未修复 */ }
+    check(
+      'RPC doctorRepair 从归档定点还原损坏文件',
+      repair?.ok === true && repair?.repaired?.length === 1 && repairedBytesOk,
+      `${JSON.stringify(repair).slice(0, 160)} bytes=${repairedBytesOk}`,
+    );
+
+    const rescan = await rpc('doctorScan');
+    check('修复后复扫全绿', rescan?.ok === true && rescan?.corruptCount === 0, JSON.stringify(rescan).slice(0, 160));
+
+    // 老归档兼容：删 meta/redacted 边车（v0.6.x 形态）→ dry-run 静默降级仍可预览
+    const bkdest = path.join(home, 'bkdest');
+    const legacyName = fs.readdirSync(bkdest).filter((f) => /^dsh-\d.*\.tar\.gz$/.test(f)).sort().pop();
+    for (const suffix of ['.meta.json', '.redacted.json']) fs.rmSync(path.join(bkdest, legacyName + suffix), { force: true });
+    const legacyPre = await rpc('restore', { selector: legacyName.replace(/\.tar\.gz$/, ''), dryRun: true });
+    check(
+      '无边车老归档 dry-run 静默降级（无脱敏提示、有老格式提醒）',
+      legacyPre?.ok === true && !String(legacyPre?.summary).includes('🔐') && String(legacyPre?.summary).includes('未携带脱敏清单'),
+      JSON.stringify(legacyPre).slice(0, 220),
+    );
   }
 
   // ---------- 总结 ----------

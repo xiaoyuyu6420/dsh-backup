@@ -5,7 +5,8 @@
  * tools / timer 服务接口，在临时目录中对 lib/index.js 跑完整场景：
  * 备份 → 列表/校验 → 篡改数据 → 预览/恢复 → 损坏检测 → 恢复拒绝 →
  * 恶意归档拒绝（.. 段 / symlink 逃逸）→ 取消分类 → 定时持久化续跑
- * （按上次执行时间锚定）→ 轮换 → GitHub 凭据保留 → auto keep 可配。
+ * （按上次执行时间锚定）→ 轮换 → GitHub 凭据保留 → auto keep 可配 →
+ * doctor 体检/定点修复 → 老归档无边车兼容 → 空目标机恢复。
  * 在 Windows 上运行即验证 win32 分支
  * （fs.unlink/rename、tar.exe、crypto 哈希回退）。
  *
@@ -16,7 +17,9 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { gzipSync } from 'node:zlib';
+// 命名空间导入：zstd 系导出在 Node <22.15/23.8 不存在，具名导入会让整个
+// 套件加载失败——套件本身要能跨运行时启动才能测插件的降级路径。
+import * as zlib from 'node:zlib';
 
 const IS_WIN = process.platform === 'win32';
 let failures = 0;
@@ -227,7 +230,32 @@ function makeTarGz(entries) {
     if (pad) blocks.push(Buffer.alloc(pad));
   }
   blocks.push(Buffer.alloc(512), Buffer.alloc(512)); // 结尾两个零块
-  return gzipSync(Buffer.concat(blocks));
+  return zlib.gzipSync(Buffer.concat(blocks));
+}
+
+/**
+ * 构造健康的会话日志（zstd 拼接帧或 raw 文本），布局对齐
+ * @deepseek-ai/dsh-session-persistence-jsonl：首帧 SessionHeader，
+ * 其后每批一帧；packed 行（text-chunks）横跨 seq2..4，随后裸事件接续。
+ */
+function makeSessionLogLines(id) {
+  const header = JSON.stringify({ type: 'session', version: 0, id, createdAt: '2026-08-25T00:00:00.000Z', delegationDepth: 0 });
+  const ev = (seq) => JSON.stringify({ type: 'user/message', seq });
+  const packedRow = JSON.stringify({ type: 'text-chunks', seq0: 2, time0: 1000, data: { turn: 0, step: 0, index: 0, dt: [5, 7], texts: ['a', 'b', 'c'] } });
+  return [header, ev(0), ev(1), packedRow, ev(5), ev(6)];
+}
+
+function makeZstdSessionLog(id) {
+  // 无 zstd 运行时（Node <22.15/23.8）：内容无所谓——体检对这些文件走 skipped
+  if (typeof zlib.zstdCompressSync !== 'function') {
+    return Buffer.from(`placeholder-zstd-log-${id}`);
+  }
+  // 三帧：header / 裸事件两行 / packed 行 + 后续裸事件
+  return Buffer.concat([
+    zlib.zstdCompressSync(`${makeSessionLogLines(id).slice(0, 1).join('\n')}\n`),
+    zlib.zstdCompressSync(`${makeSessionLogLines(id).slice(1, 3).join('\n')}\n`),
+    zlib.zstdCompressSync(`${makeSessionLogLines(id).slice(3).join('\n')}\n`),
+  ]);
 }
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
@@ -392,7 +420,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo']), `10 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair']), `12 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -733,7 +761,7 @@ async function main() {
     console.log('19) RPC 方法名保留字预检（#2 事故防复发，issue #9）');
     const contrib19 = mock.typertContribs[0];
     const methods19 = contrib19 ? contrib19.invocations.map((d) => d.method) : [];
-    ok(methods19.length === 10, `注册了 ${methods19.length} 个 RPC 方法（期望 10）`);
+    ok(methods19.length === 12, `注册了 ${methods19.length} 个 RPC 方法（期望 12）`);
     let reservedHit = null;
     for (const name of methods19) {
       try { assertPanelMethodAvailable('backupPanel', name); } catch { reservedHit = name; }
@@ -745,6 +773,127 @@ async function main() {
     let toStringRejected = false;
     try { assertPanelMethodAvailable('backupPanel', 'toString'); } catch { toStringRejected = true; }
     ok(toStringRejected, 'Object.prototype 名 toString 会被预检拒绝');
+
+    console.log('20) doctor：会话日志体检 + 定点修复');
+    {
+      const env20 = await mkTmpHome();
+      try {
+        const mock20 = makeCtx({ home: env20.home, dsh: env20.dsh });
+        plugin(mock20.ctx, {});
+        const sessDir = path.join(env20.dsh, 'sessions', '--proj--');
+        // 五个会话目录先全部写入健康内容，再备份（归档持健康副本），最后弄坏三个现场
+        const good = makeZstdSessionLog('sess-good');
+        const rawLines = makeSessionLogLines('sess-raw');
+        // raw 样本只取 header + 两条裸事件（packed 行属 zstd 帧布局，raw 版不带）
+        const rawGood = Buffer.from(rawLines.slice(0, 3).join('\n'), 'utf8');
+        const files = [
+          ['enc-good', 'session.jsonl.zstd', good],
+          ['raw-good', 'session.jsonl', rawGood],
+          ['enc-magic', 'session.jsonl.zstd', good],
+          ['enc-trunc', 'session.jsonl.zstd', makeZstdSessionLog('sess-trunc')],
+          ['raw-gap', 'session.jsonl', rawGood],
+        ];
+        for (const [dirName, fileName, content] of files) {
+          await fs.mkdir(path.join(sessDir, dirName), { recursive: true });
+          await fs.writeFile(path.join(sessDir, dirName, fileName), content);
+        }
+        ok((await mock20.tool().execute({ mode: 'backup' }, {})).ok === true, 'doctor 场景备份成功');
+
+        // 弄坏三个现场：坏魔数 / 截断帧 / seq 跳号
+        await fs.writeFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd'), Buffer.from('definitely not zstd output!!'));
+        await fs.writeFile(path.join(sessDir, 'enc-trunc', 'session.jsonl.zstd'), good.subarray(0, good.length - 4));
+        await fs.writeFile(
+          path.join(sessDir, 'raw-gap', 'session.jsonl'),
+          [makeSessionLogLines('x')[0], JSON.stringify({ type: 'user/message', seq: 0 }), JSON.stringify({ type: 'user/message', seq: 2 })].join('\n'),
+        );
+
+        const scan = await mock20.tool().execute({ mode: 'doctor' }, {});
+        // 运行时自适应：Node ≥22.15/23.8 才有内置 zstd 解码。有 → 3 个损坏全检出；
+        // 无（如 Node 20）→ zstd 文件进 skipped、只有 raw 跳号可检出——这正是
+        // HAS_NODE_ZSTD 降级路径的实测。
+        const { zstdDecompressSync: probe } = await import('node:zlib');
+        const zstdOk = typeof probe === 'function';
+        const expectBad = zstdOk ? 3 : 1;
+        const dump = scan.corrupt.map((c) => `${c.path} ← ${c.reason}`).join(' | ');
+        ok(scan.ok === false && scan.corruptCount === expectBad, `扫描检出 ${expectBad} 个损坏（实际 ${scan.corruptCount}）`);
+        if (zstdOk) {
+          ok(scan.corrupt.some((c) => c.path.includes('enc-magic')), `坏魔数检出: ${dump}`);
+          ok(scan.corrupt.some((c) => c.path.includes('enc-trunc')), '截断帧检出');
+        } else {
+          ok(scan.skippedCount === 3, `无 zstd 运行时：3 个 .zstd 全部标记 skipped 而非损坏（实际 ${scan.skippedCount}）`);
+          ok(scan.corrupt.every((c) => !c.path.endsWith('.zstd')), `损坏清单只含 raw 文件: ${dump}`);
+          ok(scan.summary.includes('未能深度校验'), '扫描汇总提示 skipped');
+        }
+        ok(scan.corrupt.some((c) => c.path.includes('raw-gap') && c.reason.includes('期望 1')), 'seq 跳号检出');
+        ok(!scan.corrupt.some((c) => c.path.includes('-good')), `健康文件零误报: ${dump}`);
+
+        const cmdScan = await mock20.handler('doctor');
+        ok(cmdScan.kind === 'error' && cmdScan.text.includes('/backup doctor --repair'), '命令面 doctor 报告损坏并提示修复用法');
+
+        const repairTargets = zstdOk ? ['enc-magic', 'enc-trunc', 'raw-gap'] : ['raw-gap'];
+        const repair = await mock20.tool().execute({ mode: 'doctor', selector: 'latest', repair: true }, {});
+        ok(repair.ok === true && repair.repaired.length === expectBad, `定点修复 ${expectBad} 个（实际 ${repair.repaired.length}）`);
+        if (zstdOk) {
+          ok(await fs.readFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd')).then((b) => b.equals(good)), '坏魔数文件已还原为健康字节');
+        }
+        ok(await fs.readFile(path.join(sessDir, 'raw-gap', 'session.jsonl'), 'utf8').then((t) => t === rawGood.toString('utf8')), 'seq 跳号文件已还原');
+        let keptCount = 0;
+        for (const dirName of repairTargets) {
+          const names = await fs.readdir(path.join(sessDir, dirName));
+          keptCount += names.filter((n) => n.includes('.corrupt-')).length;
+        }
+        ok(keptCount === expectBad, `损坏现场留档 *.corrupt-* ×${expectBad}（实际 ${keptCount}）`);
+
+        const rescanCmd = await mock20.handler('doctor');
+        ok(rescanCmd.kind === 'success', `修复后复扫全绿: ${rescanCmd.kind === 'error' ? rescanCmd.text.split('\n')[0] : ''}`);
+      } finally {
+        await fs.rm(env20.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('21) 老归档兼容：缺 meta/redacted 边车（v0.6.x 形态）');
+    {
+      const env21 = await mkTmpHome();
+      try {
+        const mock21 = makeCtx({ home: env21.home, dsh: env21.dsh });
+        plugin(mock21.ctx, {});
+        await mock21.handler('');
+        const arch21 = (await listArchives(env21.root))[0];
+        await fs.rm(`${env21.root}/${arch21}.meta.json`, { force: true });
+        await fs.rm(`${env21.root}/${arch21}.redacted.json`, { force: true });
+        const ver21 = await mock21.handler('verify');
+        ok(ver21.kind === 'success', '无边车老归档 verify 通过（.sha256 自首版就有）');
+        await fs.writeFile(path.join(env21.dsh, 'settings.json'), '{"a":9}');
+        const pre21 = await mock21.handler('restore latest --dry-run');
+        ok(pre21.kind === 'success', 'dry-run 预览成功');
+        ok(!pre21.text.includes('🔐'), '不再出现脱敏预检行（静默降级）');
+        ok(pre21.text.includes('未携带脱敏清单'), '提示老归档无凭据保障');
+        const res21 = await mock21.handler('restore latest');
+        ok(res21.kind === 'success', `全量恢复成功: ${res21.kind === 'success' ? '' : res21.text}`);
+        ok(await fs.readFile(path.join(env21.dsh, 'settings.json'), 'utf8') === '{"a":1}', '内容回到备份时点');
+      } finally {
+        await fs.rm(env21.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('22) 空目标机恢复：~/.dsh 整个不存在');
+    {
+      const env22 = await mkTmpHome();
+      const outside22 = path.join(env22.dir, 'outside-backups').split(path.sep).join('/');
+      try {
+        const mock22 = makeCtx({ home: env22.home, dsh: env22.dsh });
+        plugin(mock22.ctx, { destination: outside22 });
+        await mock22.handler('');
+        await fs.rm(env22.dsh, { recursive: true, force: true });
+        const res22 = await mock22.handler('restore latest');
+        ok(res22.kind === 'success', `目标缺失时恢复成功: ${res22.kind === 'success' ? '' : res22.text}`);
+        ok(!res22.text.includes('旧数据没丢') && !res22.text.includes('保险快照'), '无现有数据时不快照、不 aside');
+        ok(await fs.readFile(path.join(env22.dsh, 'settings.json'), 'utf8') === '{"a":1}', '数据已解回 ~/.dsh');
+        ok(await fs.readFile(path.join(env22.dsh, '.credentials.yaml'), 'utf8').then(() => true, () => false), '凭据从 vault 自动还原');
+      } finally {
+        await fs.rm(env22.dir, { recursive: true, force: true });
+      }
+    }
 
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
