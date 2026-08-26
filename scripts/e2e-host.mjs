@@ -54,7 +54,10 @@ function startBoot() {
   bootLogStream = fs.createWriteStream(bootLogPath);
   bootProc = spawn('dsh', ['web', '--no-open'], {
     cwd: home,
-    env: { ...process.env, DSH_HOME: home },
+    // HOME 一并隔离：默认备份目的地（~/Desktop/dsh-backups）与 auto.json 都
+    // 派生自 HOME——不隔离会把启动钩子的状态写进开发者真实备份目录
+    // （实测污染事故，见 PR #30 讨论）。
+    env: { ...process.env, DSH_HOME: home, HOME: home, USERPROFILE: home },
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -302,6 +305,138 @@ async function main() {
       legacyPre?.ok === true && !String(legacyPre?.summary).includes('🔐') && String(legacyPre?.summary).includes('未携带脱敏清单'),
       JSON.stringify(legacyPre).slice(0, 220),
     );
+
+    // ---------- 智能备份全流程：真宿主版本探测 + 模拟升级 + 体检隔离链路 ----------
+    // 1) 启动即记录"正在运行的宿主版本"，且与 CLI 报告一致（argv 解析实证，
+    //    覆盖全局/npm/npx 缓存安装形态）。auto.json 跟随生效备份目录：首次
+    //    启动在默认目的地（HOME 已隔离），设置 destination 后迁移到 bkdest。
+    const verOut = spawnSync('dsh', ['--version'], { encoding: 'utf8' });
+    const cliVersion = (verOut.stdout || '').trim();
+    const defaultAuto = () => path.join(home, 'Desktop', 'dsh-backups', 'auto.json');
+    const bkdestAuto = () => path.join(home, 'bkdest', 'auto.json');
+    const readAuto = () => {
+      for (const p of [defaultAuto(), bkdestAuto()]) {
+        try {
+          return JSON.parse(fs.readFileSync(p, 'utf8'));
+        } catch { /* 尝试下一个位置 */ }
+      }
+      return null;
+    };
+    let bootedTrain = null;
+    for (let i = 0; i < 20 && bootedTrain === null; i += 1) {
+      await new Promise((r) => setTimeout(r, 250));
+      const a = readAuto();
+      if (a && typeof a.lastTrain === 'string') bootedTrain = a.lastTrain;
+    }
+    check('启动记录运行中宿主版本，与 dsh --version 一致', typeof bootedTrain === 'string' && bootedTrain === cliVersion, `auto=${bootedTrain} cli=${cliVersion}`);
+
+    // 2) 模拟升级：改写全部已知 auto.json 的 lastTrain → 重启宿主 → 钩子自动拍快照
+    for (const p of [defaultAuto(), bkdestAuto()]) {
+      try {
+        const o = JSON.parse(fs.readFileSync(p, 'utf8'));
+        fs.writeFileSync(p, JSON.stringify({ ...o, lastTrain: '0.0.0-e2e-old' }));
+      } catch { /* 该位置尚无文件 */ }
+    }
+    await stopBoot();
+    startBoot();
+    await waitBoot();
+    let snapName = null;
+    // 快照落在"生效备份目录"——seam 块的 reset 会把 destination 打回默认，
+    // 两个候选目录都要扫
+    for (let i = 0; i < 40 && !snapName; i += 1) {
+      await new Promise((r) => setTimeout(r, 250));
+      for (const p of [defaultAuto(), bkdestAuto()]) {
+        const dir = path.dirname(p);
+        try {
+          snapName = fs.readdirSync(dir).find((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz')) || null;
+        } catch { /* 目录尚不存在 */ }
+        if (snapName) break;
+      }
+      if (snapName) break;
+    }
+    check('模拟升级后自动产生 dsh-pre-upgrade- 快照', Boolean(snapName), `snap=${snapName}`);
+    if (!snapName) {
+      // 现场转储：两个候选备份目录的内容 + 本次 boot 日志中本插件相关行
+      const dumpDir = (p) => {
+        try {
+          return `${p} → ${fs.readdirSync(p).join(', ')}`;
+        } catch (e) {
+          return `${p} → (${e.code})`;
+        }
+      };
+      console.error(`[e2e-host][debug] ${dumpDir(path.join(home, 'Desktop', 'dsh-backups'))}`);
+      console.error(`[e2e-host][debug] ${dumpDir(bkdest)}`);
+      try {
+        const hits = fs.readFileSync(path.join(home, 'boot.log'), 'utf8')
+          .split('\n')
+          .filter((l) => l.includes('dsh-backup') || /error|异常|失败/i.test(l))
+          .slice(-15);
+        console.error(`[e2e-host][debug] boot.log 相关行:\n${hits.join('\n')}`);
+      } catch { /* 日志不可读 */ }
+    }
+    // 钩子在快照文件落盘后还有 prune/回写 lastTrain 的尾巴，且回写目标是
+    // "生效备份目录"的 auto.json——两个候选任一回写为真实版本即通过
+    let trainOk = false;
+    for (let i = 0; i < 20 && !trainOk; i += 1) {
+      await new Promise((r) => setTimeout(r, 250));
+      trainOk = [defaultAuto(), bkdestAuto()].some((p) => {
+        try {
+          return JSON.parse(fs.readFileSync(p, 'utf8')).lastTrain === cliVersion;
+        } catch {
+          return false;
+        }
+      });
+    }
+    const rawAutos = [defaultAuto(), bkdestAuto()].map((p) => {
+      try {
+        return `${path.basename(path.dirname(path.dirname(p)))}:${JSON.parse(fs.readFileSync(p, 'utf8')).lastTrain}`;
+      } catch {
+        return `${path.basename(path.dirname(p))}:(-)`;
+      }
+    }).join(' | ');
+    check('快照后 lastTrain 回写为真实宿主版本', trainOk, `raw[${rawAutos}]`);
+    const stSnap = await rpc('status');
+    console.log(`[e2e-host][info] rpcDestination=${stSnap?.destination} backups=${JSON.stringify((stSnap?.backups ?? []).map((b) => b.name))}`);
+    console.log(`[e2e-host][info] defaultAuto exists=${fs.existsSync(defaultAuto())} bkdestAuto exists=${fs.existsSync(bkdestAuto())}`);
+    check(
+      '内部快照不进用户备份列表',
+      Array.isArray(stSnap?.backups) && stSnap.backups.length > 0 && !stSnap.backups.some((b) => b.name.startsWith('dsh-pre-upgrade-')),
+      `rpcDestination=${stSnap?.destination} backups=${JSON.stringify(stSnap?.backups?.slice(0, 2))}`,
+    );
+    if (snapName) {
+      const preDry = await rpc('restore', { selector: snapName.replace(/\.tar\.gz$/, ''), dryRun: true });
+      check('显式前缀可恢复升级前快照（dry-run）', preDry?.ok === true, JSON.stringify(preDry).slice(0, 160));
+    }
+
+    // 3) 体检隔离全流程：好文件入档(A) → 弄坏 → 再备份(B)被隔离 → 从 A 定点修复
+    const qDir = path.join(home, 'sessions', '--e2e-q--', 'raw-x');
+    fs.mkdirSync(qDir, { recursive: true });
+    const healthyText = [
+      JSON.stringify({ type: 'session', version: 0, id: 'sess-q', createdAt: '2026-08-26T00:00:00.000Z', delegationDepth: 0 }),
+      JSON.stringify({ type: 'user/message', seq: 0 }),
+      JSON.stringify({ type: 'user/message', seq: 1 }),
+    ].join('\n');
+    fs.writeFileSync(path.join(qDir, 'session.jsonl'), healthyText);
+    await rpc('backup');
+    const nameA = (await rpc('status')).backups[0].name;
+    fs.writeFileSync(path.join(qDir, 'session.jsonl'), `${healthyText}\n${JSON.stringify({ type: 'user/message', seq: 7 })}`);
+    const bkB = await rpc('backup');
+    check('隔离备份回执出现警告', bkB?.ok === true && String(bkB?.summary).includes('未入档'), JSON.stringify(bkB).slice(0, 160));
+    const nameB = (await rpc('status')).backups[0].name;
+    const bTar = spawnSync('tar', ['-tzf', path.join(bkdest, nameB)], { encoding: 'utf8' }).stdout;
+    check('损坏会话文件不入档 B', !bTar.includes('raw-x/session.jsonl'), bTar.split('\n').filter((l) => l.includes('raw-x')).join(','));
+    const metaB = JSON.parse(fs.readFileSync(path.join(bkdest, `${nameB}.meta.json`), 'utf8'));
+    check('B 的 meta.quarantined 记录隔离清单', Array.isArray(metaB.quarantined) && metaB.quarantined.some((p) => p.includes('raw-x')), JSON.stringify(metaB.quarantined));
+    const scanQ = await rpc('doctorScan');
+    check('doctorScan 检出该损坏文件', scanQ?.corruptCount === 1 && String(scanQ?.corrupt?.[0]?.path).includes('--e2e-q--'), JSON.stringify(scanQ).slice(0, 160));
+    const repQ = await rpc('doctorRepair', { selector: nameA.replace(/\.tar\.gz$/, '') });
+    let bytesOk = false;
+    try {
+      bytesOk = fs.readFileSync(path.join(qDir, 'session.jsonl'), 'utf8') === healthyText;
+    } catch { /* 缺失即失败 */ }
+    check('从更早归档 A 定点修复且字节一致', repQ?.ok === true && repQ?.repaired?.length === 1 && bytesOk, `${JSON.stringify(repQ).slice(0, 160)} bytes=${bytesOk}`);
+    const rescanQ = await rpc('doctorScan');
+    check('修复后复扫全绿', rescanQ?.ok === true && rescanQ?.corruptCount === 0, JSON.stringify(rescanQ).slice(0, 120));
   }
 
   // ---------- 总结 ----------
