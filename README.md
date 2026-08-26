@@ -11,7 +11,7 @@ English | [简体中文](README.zh.md)
 
 Sessions, settings, skills, and plugin config all live in `~/.dsh`. Delete it by accident, break a config, or move to a new machine — with a backup, you get it all back. Credentials never enter an archive; scheduled backups and GitHub sync are supported (details in the [advanced guide](docs/advanced.zh.md), Chinese).
 
-Recent additions: **0.8.0** can edit backup settings right in the panel (destination, retention, exclude patterns) — saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of being silently overwritten. **0.7.x** added credential redaction with a local vault and cross-machine restore.
+Recent additions: **0.9.0** adds a session-log health check with targeted repair (`/backup doctor`), an out-of-process rescue channel (`dsh-rescue` / launcher dropped into the backup dir) that works even when the host won't boot, restore auto-rollback with a result-oriented receipt, and smart backup: pre-upgrade snapshots on host train changes, quarantine of corrupt session logs before they rotate away, and tiered daily/weekly retention. **0.8.0** can edit backup settings right in the panel (destination, retention, exclude patterns) — saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of being silently overwritten. **0.7.x** added credential redaction with a local vault and cross-machine restore.
 
 ## Install
 
