@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 反馈与讨论（Feedback & general discussion）
+    url: https://github.com/xiaoyuyu6420/dsh-backup/discussions/32
+    about: 用得顺不顺手、缺什么、想要什么——先来反馈帖说两句，好坏都收，直接进路线图。
+  - name: 📚 进阶文档（Advanced guide）
+    url: https://github.com/xiaoyuyu6420/dsh-backup/blob/main/docs/advanced.zh.md
+    about: 定时策略、凭据脱敏、GitHub 同步、恢复保护、配置参考、故障排查。
