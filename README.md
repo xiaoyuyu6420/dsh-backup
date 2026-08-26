@@ -43,6 +43,7 @@ Want it on a schedule? `/backup auto 12` — every 12 hours, keeps going across 
 | List backups | `/backup list` |
 | Verify integrity | `/backup verify [prefix\|all]` |
 | Check & repair session logs | `/backup doctor` (`--repair [prefix\|latest]` to fix from a backup) |
+| **Total failure rescue** | double-click `点我恢复` in the backup dir, or `node rescue.mjs` — a zero-dependency recovery console (web UI) that works even when DSH won't boot |
 | Delete | `/backup delete <prefix\|latest>` |
 | Keep N copies (default 7) | `/backup --keep N` |
 

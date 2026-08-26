@@ -81,6 +81,32 @@
 
 体检的格式依据宿主内置的 `@deepseek-ai/dsh-session-persistence-jsonl`；若宿主升级后出现成片误报，请提 issue。
 
+## 救援通道（DSH 彻底起不来时）
+
+dsh-backup 是宿主插件——DSH 进程起不来时它也死了。救援通道补的就是这个洞：**每次备份都会往备份目录里写一套进程外自救工具**，只用 Node 内置能力 + 系统 tar，不依赖任何 DSH 组件。DSH 依赖 Node 才能跑，所以宿主坏了 Node 一定活着。
+
+备份目录（默认 `~/Desktop/dsh-backups/`）里躺着：
+
+- **点我恢复.command / .bat / .sh**（按你的系统生成其一）——双击即启动救援网页并自动打开浏览器，全程不用终端
+- **RESCUE.txt**——自救说明，双击文件丢了看这个
+- **rescue.mjs**——零依赖单文件工具本体
+
+救援网页（127.0.0.1，仅本机）：列出备份、逐份校验、恢复（预览 + 确认弹窗，现有数据先快照挪旁）、会话体检与定点修复。
+
+终端用法：
+
+```
+node rescue.mjs                        # 打开救援网页（同双击）
+node rescue.mjs list                   # 列出备份
+node rescue.mjs verify all            # 校验完整性
+node rescue.mjs restore latest --yes  # 恢复（不带 --yes 先预览）
+node rescue.mjs doctor --repair       # 会话日志体检/修复
+```
+
+恢复语义与插件内完全一致：先校验 → 路径穿越防护 → 现有数据快照挪旁（失败自动回滚）→ vault 凭据还原；老归档（无边车）静默降级。网页接口只监听回环地址，且写操作要求自定义请求头（防浏览器跨站触发）。
+
+新电脑/备份目录也丢了：装过插件后可用 `npx -p @xiaoyuyu6420/dsh-backup dsh-rescue`，再配 GitHub 拉回备份。
+
 ## 老备份包兼容（v0.6.x 及更早）
 
 v0.7.0 起每份备份附带 `.meta.json`（机器元数据）与 `.redacted.json`(脱敏清单) 两个边车文件；更早的归档没有边车也能正常校验、恢复（`.sha256` 校验文件自第一个版本就有）：
