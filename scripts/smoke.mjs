@@ -174,8 +174,8 @@ function makeCtx({ home, dsh, env }) {
 async function listArchives(root) {
   try {
     const names = await fs.readdir(root);
-    // 与插件 listBackups 一致：排除恢复前快照（dsh-pre-restore-*），只数用户可见备份
-    return names.filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-pre-restore-') && n.endsWith('.tar.gz')).sort().reverse();
+    // 与插件 listBackups 一致：排除全部内部快照（pre-restore/pre-upgrade），只数用户可见备份
+    return names.filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-pre-restore-') && !n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz')).sort().reverse();
   } catch {
     return [];
   }
@@ -651,9 +651,10 @@ async function main() {
       // 实恢复（会生成 dsh-pre-restore-* 快照）
       const rR = await runR(`restore ${good}`);
       ok(rR.kind === 'success', `恢复成功（用于触发 pre-restore 快照）`);
-      // (a) /backup list 不含 dsh-pre-restore-
+      // (a) /backup list 不把它混进用户备份区，但在「内部快照」分区展示（可前缀选用）
       const listOut = await runR('list');
-      ok(!listOut.text.includes('dsh-pre-restore-'), `/backup list 不显示 pre-restore 快照`);
+      ok(!listOut.text.includes(`已有备份`) || !/已有备份[^\n]*\n[^\n]*dsh-pre-restore-/.test(listOut.text), '用户备份区不含 pre-restore 快照');
+      ok(listOut.text.includes('内部快照') && listOut.text.includes('dsh-pre-restore-') && listOut.text.includes('恢复前快照'), '内部快照分区展示 pre-restore');
       // (b) 磁盘上确实存在 pre-restore 快照（证明快照仍被创建，只是隔离）
       const diskAll = (await fs.readdir(root)).filter((n) => n.startsWith('dsh-pre-restore-') && n.endsWith('.tar.gz'));
       ok(diskAll.length === 1, `磁盘有 1 份 pre-restore 快照（实际 ${diskAll.length}）`);
@@ -960,6 +961,95 @@ async function main() {
         ok(await fs.readFile(path.join(env23.dsh, '.credentials.yaml'), 'utf8').then(() => true, () => false), 'rescue 从 vault 还原凭据');
       } finally {
         await fs.rm(env23.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('24) 智能备份：升级前快照 + 备份前体检联动 + 分级轮换');
+    {
+      const env24 = await mkTmpHome();
+      const pad24 = (v, w = 2) => String(v).padStart(w, '0');
+      const dayStr = (d) => `${d.getFullYear()}-${pad24(d.getMonth() + 1)}-${pad24(d.getDate())}`;
+      try {
+        // ---- B1 升级前快照：首见列车只记录；篡改 lastTrain 后重启触发 ----
+        const mock24 = makeCtx({ home: env24.home, dsh: env24.dsh });
+        plugin(mock24.ctx, {});
+        await mock24.handler('');
+        const pre0 = (await fs.readdir(env24.root)).filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz'));
+        ok(pre0.length === 0, '首次启动只记录列车，不拍升级快照');
+        const autoPath = path.join(env24.root, 'auto.json');
+        // 升级前快照的首次记录由启动钩子异步落盘（与首次备份并发），轮询等待
+        let auto1 = null;
+        for (let i = 0; i < 16 && !(auto1 && typeof auto1.lastTrain === 'string'); i += 1) {
+          await new Promise((rr) => setTimeout(rr, 250));
+          try {
+            auto1 = JSON.parse(await fs.readFile(autoPath, 'utf8'));
+          } catch { /* 尚未落盘 */ }
+        }
+        ok(auto1 && typeof auto1.lastTrain === 'string' && auto1.lastTrain, 'auto.json 已记录宿主列车');
+        await fs.writeFile(autoPath, JSON.stringify({ ...auto1, lastTrain: '0.0.1-test-old' }));
+        plugin(makeCtx({ home: env24.home, dsh: env24.dsh }).ctx, {});
+        let preUpgrade = [];
+        for (let i = 0; i < 40 && !(preUpgrade = (await fs.readdir(env24.root)).filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz'))).length; i += 1) {
+          await new Promise((rr) => setTimeout(rr, 250));
+        }
+        ok(preUpgrade.length === 1, `列车变化触发升级前快照（实际 ${preUpgrade.length}）`);
+        ok(JSON.parse(await fs.readFile(autoPath, 'utf8')).lastTrain !== '0.0.1-test-old', 'lastTrain 已更新');
+        const l24 = await mock24.handler('list');
+        ok(l24.text.includes('内部快照') && l24.text.includes('升级前快照'), 'list 分区展示内部快照');
+        ok(!(await listArchives(env24.root)).some((n) => n.startsWith('dsh-pre-upgrade-')), '用户备份列表不含内部快照');
+        const preRestore24 = await mock24.handler(`restore ${preUpgrade[0].replace('.tar.gz', '')} --dry-run`);
+        ok(preRestore24.kind === 'success' && preRestore24.text.includes('恢复预览'), '显式前缀可选中升级前快照');
+
+        // ---- B2 备份前体检联动：坏会话不入档 + meta 记录 + 恢复预检提示 ----
+        const sessDir = path.join(env24.dsh, 'sessions', '--proj--');
+        const rawLines = makeSessionLogLines('q-raw');
+        const rawGood = Buffer.from(rawLines.slice(0, 3).join('\n'), 'utf8');
+        await fs.mkdir(path.join(sessDir, 'raw-q'), { recursive: true });
+        await fs.writeFile(path.join(sessDir, 'raw-q', 'session.jsonl'), rawGood);
+        // 先备一份含健康副本的归档，作为后续 doctor 定点修复的来源
+        await mock24.handler('');
+        const goodBk = (await listArchives(env24.root))[0];
+        await fs.writeFile(
+          path.join(sessDir, 'raw-q', 'session.jsonl'),
+          [rawLines[0], JSON.stringify({ type: 'user/message', seq: 0 }), JSON.stringify({ type: 'user/message', seq: 9 })].join('\n'),
+        );
+        const bkQ = await mock24.handler('');
+        ok(bkQ.kind === 'success' && bkQ.text.includes('未入档'), `回执出现隔离警告: ${(bkQ.text.match(/⚠️[^\n]*/) || ['(无)']).join('')}`);
+        const qArchive = (await listArchives(env24.root))[0];
+        ok(!((await tarList(env24.root, qArchive)).some((e) => e.includes('raw-q/session.jsonl'))), '损坏会话文件不在归档内（目录壳可有）');
+        const qMeta = JSON.parse(await fs.readFile(`${env24.root}/${qArchive}.meta.json`, 'utf8'));
+        ok(Array.isArray(qMeta.quarantined) && qMeta.quarantined.some((p) => p.includes('raw-q')), 'meta.quarantined 记录隔离清单');
+        const preQ = await mock24.handler(`restore ${qArchive.replace('.tar.gz', '')} --dry-run`);
+        ok(preQ.kind === 'success' && preQ.text.includes('体检隔离'), '恢复预检提示隔离文件');
+        const repQ = await mock24.tool().execute({ mode: 'doctor', selector: goodBk.replace('.tar.gz', ''), repair: true }, {});
+        ok(repQ.ok === true && repQ.repaired.length === 1, `doctor 从更早归档定点修复: ${repQ.summary.split('\n')[0]}`);
+
+        // ---- B3 分级轮换：keep=1 之外，日级保 7 天、周级再保 4 周，其余删除 ----
+        // 伪造旧归档（日期在名字里；内容复制现有归档，sha 边车同步复制仍有效）
+        const srcArc = path.join(env24.root, qArchive);
+        const fakeDays = [1, 2, 3, 4, 5, 6, 7, 30, 30, 37, 44, 51, 58];
+        for (let i = 0; i < fakeDays.length; i += 1) {
+          const dte = new Date(Date.now() - fakeDays[i] * 86400000);
+          const name = `dsh-${dte.getFullYear()}${pad24(dte.getMonth() + 1)}${pad24(dte.getDate())}-${pad24(i % 24)}${pad24((i * 7) % 60)}${pad24((i * 13) % 60)}${pad24(i, 3)}.tar.gz`;
+          for (const suf of ['', '.sha256', '.meta.json']) {
+            await fs.copyFile(`${srcArc}${suf}`, `${env24.root}/${name}${suf}`);
+          }
+        }
+        const bkT = await mock24.handler('--keep 1');
+        ok(bkT.kind === 'success', `keep=1 备份成功: ${bkT.kind === 'success' ? '' : bkT.text}`);
+        const afterNames = await listArchives(env24.root);
+        const keptDays = new Set(afterNames.map((n) => { const m = /^dsh-(\d{4})(\d{2})(\d{2})-/.exec(n); return m ? `${m[1]}-${m[2]}-${m[3]}` : null; }));
+        for (let dd = 1; dd <= 7; dd += 1) {
+          ok(keptDays.has(dayStr(new Date(Date.now() - dd * 86400000))), `D-${dd} 的每日首份被分级保留`);
+        }
+        for (const dd of [30, 37, 44, 51]) {
+          ok(keptDays.has(dayStr(new Date(Date.now() - dd * 86400000))), `D-${dd}（周级）被保留`);
+        }
+        ok(!keptDays.has(dayStr(new Date(Date.now() - 58 * 86400000))), 'D-58 超出周级预算被删除');
+        const d30Count = afterNames.filter((n) => n.includes(`-${dayStr(new Date(Date.now() - 30 * 86400000)).split('-').join('')}`)).length;
+        ok(d30Count === 1, `同日冗余只留首份（D-30 留 ${d30Count} 份）`);
+      } finally {
+        await fs.rm(env24.dir, { recursive: true, force: true });
       }
     }
 
