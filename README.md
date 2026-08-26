@@ -7,60 +7,122 @@
 
 English | [简体中文](README.zh.md)
 
-**dsh-backup is a DeepSeek Harness (DSH) plugin that backs up and restores `~/.dsh` with a single command.**
+**Your entire DeepSeek Harness (DSH) workspace lives in one folder: `~/.dsh`. One failed upgrade, one accidental delete, one new laptop — without a backup, sessions, settings and skills are all gone. dsh-backup gives them back with one command.**
 
-Sessions, settings, skills, and plugin config all live in `~/.dsh`. Delete it by accident, break a config, or move to a new machine — with a backup, you get it all back. Credentials never enter an archive; scheduled backups and GitHub sync are supported (details in the [advanced guide](docs/advanced.zh.md), Chinese).
+```sh
+dsh plugin --profile web add @xiaoyuyu6420/dsh-backup   # install
+# restart dsh web, then type:
+/backup                                                  # → a verified archive lands in ~/Desktop/dsh-backups/
+```
 
-Recent additions: **0.9.0** adds a session-log health check with targeted repair (`/backup doctor`), an out-of-process rescue channel (`dsh-rescue` / launcher dropped into the backup dir) that works even when the host won't boot, restore auto-rollback with a result-oriented receipt, and smart backup: pre-upgrade snapshots on host train changes, quarantine of corrupt session logs before they rotate away, and tiered daily/weekly retention. **0.8.0** can edit backup settings right in the panel (destination, retention, exclude patterns) — saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of being silently overwritten. **0.7.x** added credential redaction with a local vault and cross-machine restore.
+Real output from a fresh v0.9.0 install:
+
+```text
+备份完成: dsh-20260826-195150036.tar.gz
+sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
+轮换删除 0 份（保留 7 份）
+```
+
+Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins → Backup: list, verify, restore, delete, edit settings — no restart.
+
+![Backup panel](docs/assets/panel-backups.png)
+
+## Why you want this
+
+| Fear | What dsh-backup does about it |
+|---|---|
+| "An upgrade broke my setup" | Auto-takes a `dsh-pre-upgrade-` snapshot the moment the host version changes — try the new release, roll back if it bites |
+| "I deleted / broke something" | `/backup restore latest --dry-run` previews exactly what comes back; a failed restore auto-rolls-back and shows a result receipt |
+| "DSH won't even boot anymore" | Every backup drops a zero-dependency **rescue console** (`dsh-rescue` / `rescue.mjs`, or double-click「点我恢复」) next to the archives — a web UI that restores outside of DSH |
+| "My API keys will end up in a cloud backup" | Credentials are redacted from archives by default; plaintext only ever lives in a local vault on your machine |
+| "My session logs got corrupted" | `/backup doctor` scans and repairs session logs from a known-good backup; corrupt files are quarantined before they rotate away |
+| "I got a new machine" | GitHub sync: `/backup github pull` fetches remote archives, `restore --sync-deps` reinstalls plugins |
+| "Backups rot silently" | Every archive ships a sha256; `/backup verify all` checks integrity; daily/weekly tiered retention keeps useful history longer |
+| "I'll forget to back up" | `/backup auto 12` — every 12 hours, survives restarts, rotates old copies (default keep 7) |
+
+![Backup settings](docs/assets/panel-settings.png)
 
 ## Install
 
-The package is published on [npm](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup); install it into a DSH profile with:
+Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2` or compatible.
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
-# or from GitHub:
+# or straight from GitHub:
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-Then restart `dsh web`. Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2` or compatible.
+Restart `dsh web` afterwards.
 
 ## Quickstart
 
 1. Install (above) and restart `dsh web`
-2. Run `/backup`
-3. Done — the archive lands in `~/Desktop/dsh-backups/`, named with a timestamp
+2. Type `/backup`
+3. Done — the archive lands in `~/Desktop/dsh-backups/`, timestamped, with a `.sha256` next to it
 
-Want it on a schedule? `/backup auto 12` — every 12 hours, keeps going across restarts.
+Want it on a schedule? `/backup auto 12` (every 12 hours; `off` stops it, `status` checks it).
 
-## Commands
+## Command cheat sheet
 
 | Task | Command |
 |---|---|
 | Back up now | `/backup` |
-| Schedule | `/backup auto 12` (`off` to stop, `status` to check) |
-| Restore | `/backup restore latest` (`--dry-run` to preview) |
+| Schedule (survives restarts) | `/backup auto 12` · `off` · `status` |
+| Restore (preview first) | `/backup restore latest --dry-run` |
+| Restore for real | `/backup restore latest` |
 | List backups | `/backup list` |
 | Verify integrity | `/backup verify [prefix\|all]` |
-| Check & repair session logs | `/backup doctor` (`--repair [prefix\|latest]` to fix from a backup) |
-| **Total failure rescue** | double-click `点我恢复` in the backup dir, or `node rescue.mjs` — a zero-dependency recovery console (web UI) that works even when DSH won't boot |
-| Delete | `/backup delete <prefix\|latest>` |
-| Keep N copies (default 7) | `/backup --keep N` |
-
-There's a visual panel in `dsh web` → Settings → Plugins → Backup: it lists backups, runs verify/restore/delete, and — since 0.8.0 — edits the backup settings (destination, retention, exclude patterns) directly, applied immediately, no restart.
+| Check & repair session logs | `/backup doctor` · `--repair [prefix\|latest]` |
+| **Rescue when DSH won't boot** | double-click「点我恢复」in the backup dir, or `dsh-rescue` / `node rescue.mjs` |
+| Delete / retention | `/backup delete <prefix\|latest>` · `/backup --keep N` (default 7) |
 
 ## New machine
 
-Prerequisite: GitHub sync was configured on the old one ([setup](docs/advanced.zh.md#github-同步可选)).
+Prerequisite: GitHub sync was configured on the old one ([setup](docs/advanced.zh.md#github-同步可选), Chinese).
 
 1. Install the plugin, set the same `githubRepo`
 2. `/backup github pull` — fetch the remote backups
 3. `/backup restore latest --sync-deps` — restore and reinstall plugin dependencies
 4. Restart `dsh`
 
+## FAQ
+
+**Are my API keys / credentials inside the archive?**
+No. Known credential files are redacted before archiving; the plaintext stays in a local vault that never leaves the machine. Restoring puts them back.
+
+**What exactly gets backed up?**
+Everything under `~/.dsh` — sessions, settings, skills, plugin config — minus your exclude patterns and `node_modules`.
+
+**I messed up `~/.dsh` and now `dsh` won't start. Am I out of options?**
+No — that's exactly what the rescue channel is for. Every backup writes `rescue.mjs` and a double-clickable launcher (`点我恢复.command` / `.bat` / `.sh`) into the backup directory. It runs on plain Node, no DSH required, and serves a local web UI to browse and restore archives.
+
+**Windows support?**
+Yes — Windows 10+ with the bundled `tar`. The rescue launcher becomes a `.bat` file.
+
+**Where do backups go by default?**
+`~/Desktop/dsh-backups/` — change it any time in the panel (Settings → Plugins → Backup) or via settings; takes effect immediately, no restart.
+
+## Feedback
+
+Tried it? Tell us what broke, what's missing, what you liked — it directly shapes the roadmap:
+
+- 💬 [Share feedback (GitHub Discussions)](https://github.com/xiaoyuyu6420/dsh-backup/discussions)
+- 🐛 [Report a bug](https://github.com/xiaoyuyu6420/dsh-backup/issues)
+
+## What's new
+
+<details>
+<summary>Recent releases</summary>
+
+- **0.9.0** — `/backup doctor` session-log health check with targeted repair; out-of-process rescue channel (`dsh-rescue` / launcher in the backup dir) that works even when the host won't boot; restore auto-rollback with a result-oriented receipt; smart backup: pre-upgrade snapshots on host train changes, quarantine of corrupt session logs before they rotate away, tiered daily/weekly retention.
+- **0.8.0** — edit backup settings right in the panel (destination, retention, exclude patterns), saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of silent overwrite.
+- **0.7.x** — credential redaction with a local vault; cross-machine restore.
+
+</details>
+
 ## More
 
-Retention policy, credential redaction, GitHub sync, restore safeguards, config reference, troubleshooting, and development notes — in the [advanced guide](docs/advanced.zh.md) (Chinese).
+Retention policy, credential redaction internals, GitHub sync, restore safeguards, config reference, troubleshooting, and development notes — in the [advanced guide](docs/advanced.zh.md) (Chinese). Cross-runtime compatibility notes: [compatibility.md](docs/compatibility.md).
 
 ## Acknowledgements
 
