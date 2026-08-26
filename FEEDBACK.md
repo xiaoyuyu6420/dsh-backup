@@ -3,6 +3,15 @@
 > 目标：**200 条真实用户反馈**。口径见 `scripts/feedback-count.sh`（排除作者与 bot；一条 issue/评论/回复 = 一条反馈）。
 > 本页由巡检自动更新，最新战况永远在最上面。
 
+## 2026-08-26 20:55 — 第二轮：精准需求帖应答 + profile 引流
+
+**5 / 200**（暂无新增，渠道刚铺完，等真实用户响应）
+
+新增动作（全部以作者身份、利益相关透明）：
+
+6. 官方仓库三个「真实痛点帖」的针对性应答：[#3896 会话日志损坏](https://github.com/deepseek-ai/deepseek-harness/discussions/3896)（doctor 对口）、[#4274 seq 冲突损坏](https://github.com/deepseek-ai/deepseek-harness/discussions/4274)、[#3619 升级丢 apikey](https://github.com/deepseek-ai/deepseek-harness/discussions/3619)（脱敏 vault 对口）
+7. GitHub profile README 上线引流：https://github.com/xiaoyuyu6420 （dsh-backup 置顶推荐 + 反馈直达链接）
+
 ## 2026-08-26 20:12 — 推流第一天
 
 **5 / 200**（5 位独立用户，全部来自历史 GitHub issue）
