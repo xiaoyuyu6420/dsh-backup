@@ -3,6 +3,18 @@
 > 目标：**200 条真实用户反馈**。口径见 `scripts/feedback-count.sh`（排除作者与 bot；一条 issue/评论/回复 = 一条反馈）。
 > 本页由巡检自动更新，最新战况永远在最上面。
 
+## 2026-08-27 10:55 — 第十二轮：🎉 dsh.so 入库 + dshoneys 材料推进
+
+**6 / 200**（计数未复跑，本轮无新增反馈渠道动态）
+
+新增动作：
+
+31. **dsh.so 投稿获批**：ihuajiu/dsh-plugin-submissions#57 维护者确认「✓ 已入库」并关闭 issue（提前于 SLA 半天）。详情页 /artifact/xiaoyuyu6420/dsh-backup/ 尚在站点生成队列（404），sitemap 暂无
+32. 已在 dshoneys #19 发进度评论：入库确认 + 详情页待生成说明 + smoke-client CRITICAL 误报解释（dev 冒烟脚本不进 npm files）——needs-info 的最后一块拼图只等详情页链接
+33. 今晚 21:35 定时任务改为"探详情页→条件回链"，避免重复发言
+
+当前在途：雷达 #324、jiji262 #12、awesome #3342、dshoneys #19（只差 dsh.so 页面）
+
 ## 2026-08-27 10:25 — 第十一轮：全渠道文案审计 + 台账勘误 + CI 修复
 
 **6 / 200**（10:20 复跑，无新增）
