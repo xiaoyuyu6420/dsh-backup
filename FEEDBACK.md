@@ -3,6 +3,17 @@
 > 目标：**200 条真实用户反馈**。口径见 `scripts/feedback-count.sh`（排除作者与 bot；一条 issue/评论/回复 = 一条反馈）。
 > 本页由巡检自动更新，最新战况永远在最上面。
 
+## 2026-08-27 09:20 — 第八轮：新目录触点 ×2
+
+**5 / 200**（dsh.so SLA 今晚 21:24 前出结果）
+
+新增动作：
+
+20. 发现并更新第三方清单 jiji262/awesome-deepseek-harness：我们条目描述停留在旧版，提 [更新 PR #12](https://github.com/jiji262/awesome-deepseek-harness/pull/12)（补 v0.9.0 能力、星数 3→9）
+21. **插件雷达登记**（AdamPlatin123/awesome-dsh-plugins ⭐1402，14900+ 仓库 K8s 实测四档评级）：自动发现漏网（topic 早有但 8h 周期未捞到），按官方模板手动登记 [PR #324](https://github.com/AdamPlatin123/awesome-dsh-plugins/pull/324)——分类 🗂 文件数据、自检三步实测真实通过、maintainerCanModify 已设。合并后进 K8s 实测队列，运行级评级是硬背书
+22. 顺带发现 agentplugins 自动目录（按星数取 top150，门槛约 186 星）暂不收录我们——不动它，涨星自然入列
+23. 模板 bug 反馈顺手提给雷达作者：overlay 的 YAML name 值需引号
+
 ## 2026-08-27 08:55 — 第七轮：隔夜清扫（凌晨零变化）
 
 **5 / 200**（一夜无新反馈；机器深夜休眠，渠道静默属正常）
