@@ -3,6 +3,20 @@
 > 目标：**200 条真实用户反馈**。口径见 `scripts/feedback-count.sh`（排除作者与 bot；一条 issue/评论/回复 = 一条反馈）。
 > 本页由巡检自动更新，最新战况永远在最上面。
 
+## 2026-08-27 10:25 — 第十一轮：全渠道文案审计 + 台账勘误 + CI 修复
+
+**6 / 200**（10:20 复跑，无新增）
+
+本轮动作：
+
+26. **已发文案全量审计**（7 个渠道逐条对着代码/仓库数据核查）：官方帖 #4644、dsh.so #57、awesome #3342、雷达 #324、release notes 全部属实（抽查 defaultKeep=7、maintainerCanModify=true、PR diff 行数均实测通过）
+27. **修正两处已发文案**：tjsdyy/dshplugin#1 的安装命令改回 npm 统一口径，删除"npm pending publication"双重错误；alexchenzl/dsh-plugin-directory#144 简介移除把 credentials 列为备份内容的表述，改为强调凭据脱敏
+28. **台账勘误**：BlueWhale #88 已于 09:47 收录成功（站点 https://leenkcool.github.io/plugins.zh.html ）——从在途清单移出；补录漏记渠道 alexchenzl#144、tjsdyy/dshplugin#1 进入跟进清单
+29. **CI 修复**：f832264 升版本未重建 lib/client.js 导致全红一天，PR #48 重建产物后 main 恢复绿（Actions 页历史红叉为修复前记录，属正常）
+30. 备注：dshoneys 自动评审 CRITICAL 为误报（scripts/smoke-client.mjs:34 是 dev 冒烟脚本 new Function 加载产物自检，npm files 不含 scripts/），回填 dsh.so 链接时附解释
+
+当前在途：dsh.so #57（SLA 今晚 21:24）、雷达 #324、jiji262 #12、awesome #3342、dshoneys #19（等 dsh.so 链接回填）
+
 ## 2026-08-27 09:30 — 第十轮：第四目录核查 + 计数复跑
 
 **6 / 200**（09:17 复跑计数脚本确认，无新增）
