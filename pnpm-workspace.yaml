@@ -1,5 +1,9 @@
 # 24h 供应链冷却期，显式声明——不依赖 pnpm 版本默认值（10.x 默认关闭，11 才默认 1440）。
 # 日常 CI 保持冷却；compat.yml 追新巡检用 env 豁免（env 优先级高于本文件）。
 minimumReleaseAge: 1440
+# 禁用 pnpm 读 packageManager 字段自动切换版本：Node 20 格装 pnpm 10 会被切到
+# 需要 Node 22+ 的 pnpm 11 直接跑死（CI run 33185293846 实证）。
+# CI 各 job 已显式安装指定版本，本地 corepack 换版本不受此开关影响。
+managePackageManagerVersions: false
 allowBuilds:
   esbuild: true
