@@ -5,22 +5,40 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # engines 声称 >=20，就实测 >=20。pnpm 11 要求 Node 22+，
+          # Node 20 格用 pnpm 10 装依赖（两代都读 v9 lockfile，frozen install 同一份数据）。
+          # 显式锁定版本，不再 corepack prepare pnpm@latest 漂移。
+          - node: 20
+            pnpm: 10.33.0
+          - node: 22
+            pnpm: 11.24.0
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
 
-      - name: Enable pnpm
-        run: corepack enable && corepack prepare pnpm@latest --activate
+      # npm i -g 而非 corepack：绕开 packageManager 字段，
+      # 否则 Node 20 格会被 corepack 拉去跑不兼容的 pnpm 11。
+      - name: Install pnpm
+        run: npm i -g pnpm@${{ matrix.pnpm }}
 
-      # 不豁免 minimumReleaseAge：保持 pnpm 默认 24h 供应链冷却期。
-      # 追新 rc 列车导致本 job 红 CI 时，等列车满 24h 即可（见 docs/compatibility.md SOP）。
+      # 24h 供应链冷却期由 pnpm-workspace.yaml 的 minimumReleaseAge 显式生效，
+      # 不依赖 pnpm 版本默认值（10.x 默认关闭，11 才默认 1440）。
+      # 追新 rc 列车导致本 job 红时，等列车满 24h 即可（见 docs/compatibility.md SOP）。
       - name: Install dependencies
         run: pnpm install
 
@@ -34,6 +52,9 @@ jobs:
 
       - name: Host smoke suite
         run: node scripts/smoke.mjs
+
+      - name: Settings smoke suite
+        run: node scripts/smoke-settings.mjs
 
       - name: Client smoke suite
         run: node scripts/smoke-client.mjs

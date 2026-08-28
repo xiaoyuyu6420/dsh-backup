@@ -1,2 +1,5 @@
+# 24h 供应链冷却期，显式声明——不依赖 pnpm 版本默认值（10.x 默认关闭，11 才默认 1440）。
+# 日常 CI 保持冷却；compat.yml 追新巡检用 env 豁免（env 优先级高于本文件）。
+minimumReleaseAge: 1440
 allowBuilds:
   esbuild: true

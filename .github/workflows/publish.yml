@@ -5,22 +5,36 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
-      - name: Enable pnpm
-        run: corepack enable && corepack prepare pnpm@latest --activate
+      - name: Install pnpm
+        run: npm i -g pnpm@11.24.0
 
       - name: Install dependencies
         run: pnpm install
+
+      # 发版前全量冒烟：tag 未必落在绿 commit 上，别把没测过的代码发出去。
+      - name: Host smoke suite
+        run: node scripts/smoke.mjs
+
+      - name: Settings smoke suite
+        run: node scripts/smoke-settings.mjs
+
+      - name: Client smoke suite
+        run: node scripts/smoke-client.mjs
 
       - name: Rebuild client bundle
         run: node scripts/build-client.mjs
