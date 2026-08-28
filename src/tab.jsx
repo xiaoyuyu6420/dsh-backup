@@ -19,6 +19,16 @@ function mb(size, t) {
 }
 
 /** 渲染「备份」标签页。 */
+/** 分类型备份的候选类型（key 与宿主 BACKUP_TYPES 对齐；标签走 locales）。 */
+const TYPE_OPTIONS = [
+  ['credentials', 'typeCredentials'],
+  ['mcp', 'typeMcp'],
+  ['skills', 'typeSkills'],
+  ['sessions', 'typeSessions'],
+  ['settings', 'typeSettings'],
+  ['profiles', 'typeProfiles'],
+];
+
 export function BackupTab({ panel, t }) {
   const [snap, setSnap] = useState(null);
   const [github, setGithub] = useState(null);
@@ -30,6 +40,8 @@ export function BackupTab({ panel, t }) {
   const [pending, setPending] = useState(null);
   const [repoInput, setRepoInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
+  // 分类型备份：本次勾选的类型（空集 = 全量备份）
+  const [typeSel, setTypeSel] = useState(() => new Set());
 
   // Settings state (from /dsh-backup/settings)
   const [settings, setSettings] = useState(null);
@@ -96,7 +108,7 @@ export function BackupTab({ panel, t }) {
     }
   };
 
-  const backupNow = () => { void run('backup', () => panel.backup()).then(reload); };
+  const backupNow = () => { const types = typeSel.size ? [...typeSel] : undefined; void run('backup', () => panel.backup(undefined, types)).then(reload); };
   const verifyAll = () => { void run('verify-all', () => panel.verify('all')).then(reload); };
   const verifyOne = (name) => { void run(`verify:${name}`, () => panel.verify(name)); };
   const setAuto = (hours) => { void run('auto', () => panel.setAuto(hours)).then(reload); };
@@ -112,11 +124,11 @@ export function BackupTab({ panel, t }) {
   };
 
   // 预览刻意不走 run()：dry-run 的 summary 已由弹窗承载，再落横幅会重复。
-  const previewRestore = async (name) => {
+  const previewRestore = async (name, types) => {
     setPending(null);
     setBusy(`restore:${name}`);
     try {
-      const r = await panel.restore(name, true);
+      const r = await panel.restore(name, true, types);
       if (r.ok) {
         setBanner(null);
         setPending({
@@ -125,6 +137,9 @@ export function BackupTab({ panel, t }) {
           sample: r.sample || [],
           preflight: r.preflight ?? [],
           targetExists: r.targetExists,
+          merge: Boolean(r.merge),
+          types: r.merge ? r.types ?? [] : [],
+          willOverwrite: r.willOverwrite ?? [],
         });
       } else {
         setBanner({ ok: false, text: r.summary || t('error') });
@@ -139,7 +154,7 @@ export function BackupTab({ panel, t }) {
   const confirmRestore = () => {
     const target = pending;
     setPending(null);
-    void run(`restore:${target.name}`, () => panel.restore(target.name, false)).then(reload);
+    void run(`restore:${target.name}`, () => panel.restore(target.name, false, target.merge ? target.types : undefined)).then(reload);
   };
 
   // 确认弹窗打开时 Esc 取消；恢复执行中（busy）不响应，避免误关丢反馈。
@@ -361,8 +376,26 @@ export function BackupTab({ panel, t }) {
                 {busy === 'verify-all' ? t('busy') : t('verifyAll')}
               </button>
               <button type="button" className="dsb-btn-primary" disabled={busy !== ''} onClick={backupNow}>
-                {busy === 'backup' ? t('busy') : t('backupNow')}
+                {busy === 'backup' ? t('busy') : (typeSel.size ? t('backupTyped') : t('backupNow'))}
               </button>
+            </div>
+            <div className="dsb-row dsb-types">
+              <span className="dsb-item-meta">{t('typesLabel')}</span>
+              {TYPE_OPTIONS.map(([key, label]) => (
+                <label key={key} className="dsb-type-check">
+                  <input
+                    type="checkbox"
+                    checked={typeSel.has(key)}
+                    onChange={(e) => setTypeSel((prev) => {
+                      const next = new Set(prev);
+                      if (e.target.checked) next.add(key); else next.delete(key);
+                      return next;
+                    })}
+                  />
+                  {t(label)}
+                </label>
+              ))}
+              {typeSel.has('credentials') ? <span className="dsb-item-meta">{t('credWarn')}</span> : null}
             </div>
           </div>
 
@@ -438,13 +471,16 @@ export function BackupTab({ panel, t }) {
                 onClick={(e) => e.stopPropagation()}
               >
                 <strong className="dsb-modal-title">{t('restoreConfirmTitle')}</strong>
-                <p className="dsb-modal-sub">{pending.name} · {t('restoreEntries').replace('{n}', String(pending.files))}</p>
+                <p className="dsb-modal-sub">{pending.name}{pending.merge && pending.types.length ? ` · ${pending.types.join(', ')}` : ''} · {t('restoreEntries').replace('{n}', String(pending.files))}</p>
                 <div className="dsb-warn">
                   <p>{t('restoreWarnTitle')}</p>
                   <ul>
-                    {(pending.targetExists === false
-                      ? [t('restoreWhatFresh')]
-                      : [t('restoreWhatMove'), t('restoreWhatSnapshot'), t('restoreWhatWrite')]
+                    {(pending.merge
+                      ? [t('mergeWhatWrite').replace('{n}', String(pending.willOverwrite.length)), t('mergeWhatKeep')]
+                      : (pending.targetExists === false
+                        ? [t('restoreWhatFresh')]
+                        : [t('restoreWhatMove'), t('restoreWhatSnapshot'), t('restoreWhatWrite')]
+                      )
                     ).map((s) => <li key={s}>{s}</li>)}
                   </ul>
                 </div>
@@ -515,6 +551,50 @@ export function BackupTab({ panel, t }) {
               </ul>
             )}
           </div>
+
+          {Array.isArray(snap.typedBackups) && snap.typedBackups.length ? (
+            <div className="dsb-card">
+              <h3 className="dsb-heading">
+                <span>{t('typedTitle')}</span>
+                <span className="dsb-badge">{snap.typedBackups.length}</span>
+              </h3>
+              <ul className="dsb-list">
+                {snap.typedBackups.map((b) => (
+                  <li className="dsb-item" key={b.name}>
+                    <span className="dsb-item-name" title={b.name}>{b.name}</span>
+                    <span className="dsb-badge">{(b.types ?? []).join(', ') || '?'}</span>
+                    <span className="dsb-item-meta">{stampOf(b.name) ?? t('sizeUnknown')}</span>
+                    <span className="dsb-item-meta">{mb(b.size, t)}</span>
+                    <span className="dsb-item-actions">
+                      <a href={downloadHref(b.name)} download={b.name}>{t('download')}</a>
+                      <button
+                        type="button" className="dsb-btn-secondary"
+                        disabled={busy !== ''} onClick={() => previewRestore(b.name, b.types ?? [])}
+                      >
+                        {busy === `restore:${b.name}` ? t('busy') : t('restoreTyped')}
+                      </button>
+                      {confirmDelete === b.name ? (
+                        <button
+                          type="button" className="dsb-btn-danger"
+                          disabled={busy !== ''} onClick={() => deleteOne(b.name)}
+                        >
+                          {busy === `delete:${b.name}` ? t('busy') : t('confirmDelete')}
+                        </button>
+                      ) : (
+                        <button
+                          type="button" className="dsb-btn-danger"
+                          disabled={busy !== ''} onClick={() => setConfirmDelete(b.name)}
+                        >
+                          {t('delete')}
+                        </button>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="dsb-status">{t('typedHint')}</p>
+            </div>
+          ) : null}
 
           <p className="dsb-feedback">
             {t('feedbackHint')}{' '}

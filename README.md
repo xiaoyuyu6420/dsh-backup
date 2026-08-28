@@ -68,14 +68,26 @@ Want it on a schedule? `/backup auto 12` (every 12 hours; `off` stops it, `statu
 | Task | Command |
 |---|---|
 | Back up now | `/backup` |
+| Typed backup (selected types only) | `/backup --types skills,sessions` (types: `credentials`·`mcp`·`skills`·`sessions`·`settings`·`profiles`; `--only` works too) |
 | Schedule (survives restarts) | `/backup auto 12` · `off` · `status` |
 | Restore (preview first) | `/backup restore latest --dry-run` |
 | Restore for real | `/backup restore latest` |
+| Typed restore (merge, other types untouched) | `/backup restore <archive> --types skills` |
 | List backups | `/backup list` |
 | Verify integrity | `/backup verify [prefix\|all]` |
 | Check & repair session logs | `/backup doctor` · `--repair [prefix\|latest]` |
 | **Rescue when DSH won't boot** | double-click「点我恢复」in the backup dir, or `dsh-rescue` / `node rescue.mjs` |
 | Delete / retention | `/backup delete <prefix\|latest>` · `/backup --keep N` (default 7) |
+
+## Typed backup
+
+Only need certain kinds of data? Use `--types` (or `--only`) to operate on a subset. Available types: `credentials` (API keys), `mcp` (MCP config), `skills`, `sessions`, `settings`, `profiles`.
+
+- **Back up**: `/backup --types skills,sessions` creates a `dsh-t-` subset archive; rotation is tracked separately from full backups
+- **Restore**: `/backup restore <archive> --types skills` merges only skills back into your existing `~/.dsh` (preview with `--dry-run`; overwritten files are kept aside as `.pre-merge-*`). Everything else stays untouched.
+- **Credentials caveat**: `--types credentials` puts API keys into the archive **in plaintext** (full backups redact them). Such archives never go to GitHub sync — keep them local or copy them to a new machine yourself.
+- **Guardrail**: restoring a typed archive without `--types` is rejected (prevents accidental data loss); the rescue channel likewise won't list or fully restore them.
+- The Settings panel supports this too: check types under the backup button; typed archives get their own section.
 
 ## New machine
 

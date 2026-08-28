@@ -68,14 +68,26 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 | 场景 | 命令 |
 |---|---|
 | 立即备份 | `/backup` |
+| 分类型备份（只备份选中类型） | `/backup --types skills,sessions`（可选：`credentials`·`mcp`·`skills`·`sessions`·`settings`·`profiles`；`--only` 同义） |
 | 定时备份（重启不中断） | `/backup auto 12` · `off` · `status` |
 | 恢复（先预览） | `/backup restore latest --dry-run` |
 | 正式恢复 | `/backup restore latest` |
+| 分类型恢复（merge，不动其他类型） | `/backup restore <归档> --types skills` |
 | 列出备份 | `/backup list` |
 | 校验完整性 | `/backup verify [前缀\|all]` |
 | 会话日志体检/修复 | `/backup doctor` · `--repair [前缀\|latest]` |
 | **DSH 起不来时自救** | 双击备份目录里的「点我恢复」，或 `dsh-rescue` / `node rescue.mjs` |
 | 删除 / 保留策略 | `/backup delete <前缀\|latest>` · `/backup --keep N`（默认 7） |
+
+## 分类型备份
+
+只想备份/恢复某几类数据？`--types`（或 `--only`）按内容类型子集操作，可选类型：`credentials`（凭据/api key）、`mcp`（MCP 配置）、`skills`（技能）、`sessions`（会话）、`settings`（设置）、`profiles`（插件 profiles）。
+
+- **备份**：`/backup --types skills,sessions` 生成 `dsh-t-` 前缀的子集归档，与全量备份分开轮换、互不挤占保留份数
+- **恢复**：`/backup restore <归档名> --types skills` 只把 skills 合并回现有 `~/.dsh`（先 `--dry-run` 预览；覆盖的现有文件自动留档 `.pre-merge-*`），其他类型完全不碰
+- **凭据类型特殊**：`--types credentials` 会把 api key **明文**打进归档（默认全量备份是脱敏的）——这类归档绝不进 GitHub 同步，仅建议本机保存或手动拷到新机
+- **安全护栏**：分类型归档不带 `--types` 直接整包恢复会被拒绝（防止误覆盖丢数据）；rescue 救援通道同样不列、不整包恢复它们
+- 面板（Settings → 插件 → 备份）同样支持：备份按钮下方勾选类型；分类型归档在独立分区展示与恢复
 
 ## 换新电脑
 
