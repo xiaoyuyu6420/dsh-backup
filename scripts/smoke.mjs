@@ -632,11 +632,20 @@ async function main() {
       }
     }
 
+
+  // 原子写：测试注入的 auto.json 与前序用例仍在跑的 saveAutoState(rename)
+  // 竞争时，非原子 writeFile 会被 truncate+write 交错出空文件（CI 实测 flaky）
+  const atomicWriteJson = async (p, obj) => {
+    const tmp = `${p}.${Math.random().toString(36).slice(2)}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(obj));
+    await fs.rename(tmp, p);
+  };
+
     console.log('14) F2 — lastAutoAt 未来日期被拒（不静默失效）');
     {
       // 写入未来日期 lastAutoAt（auto 已开启 hours=2 的场景下注入）
       const future = '2525-01-01T00:00:00.000Z';
-      await fs.writeFile(`${root}/auto.json`, JSON.stringify({ hours: 2, lastAutoAt: future, github: {} }));
+      await atomicWriteJson(`${root}/auto.json`, { hours: 2, lastAutoAt: future, github: {} });
       const mockF2 = makeCtx({ home, dsh });
       plugin(mockF2.ctx, config);
       await new Promise((r) => setTimeout(r, 50));
@@ -647,7 +656,7 @@ async function main() {
       ok(stF.text.includes('每 2 小时'), `auto 状态正常: ${stF.text.replace(/\n/g, ' ').slice(0, 60)}`);
       // 损坏的旧 auto.json（合法过去日期）仍能续跑
       const past = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
-      await fs.writeFile(`${root}/auto.json`, JSON.stringify({ hours: 2, lastAutoAt: past, github: {} }));
+      await atomicWriteJson(`${root}/auto.json`, { hours: 2, lastAutoAt: past, github: {} });
       const mockF3 = makeCtx({ home, dsh });
       plugin(mockF3.ctx, config);
       await new Promise((r) => setTimeout(r, 50));
