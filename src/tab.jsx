@@ -125,6 +125,9 @@ export function BackupTab({ panel, t }) {
   // 预览刻意不走 run()：dry-run 的 summary 已由弹窗承载，再落横幅会重复。
   const previewRestore = async (name) => {
     setPending(null);
+    // 勾选状态在每次打开预览时重置——取消/Esc/背板退出不会走到 confirmRestore，
+    // 残留的勾选会让下一次恢复"默认重装依赖"（review P1-2）
+    setSyncDeps(false);
     setBusy(`restore:${name}`);
     try {
       const r = await panel.restore(name, true);
@@ -355,7 +358,9 @@ export function BackupTab({ panel, t }) {
                     {t('reset')}
                   </button>
                   {settingsStatus === 'saved' ? (
-                    <span className="dsb-status-ok">{t('settingsSaved')}</span>
+                    <span className="dsb-status-ok">
+                      {t('settingsSaved')}{settingsMsg ? ` ${settingsMsg}` : ''}
+                    </span>
                   ) : null}
                   {settingsStatus === 'error' ? (
                     <span className="dsb-status-error">{settingsMsg}</span>

@@ -559,9 +559,11 @@ const ERR_TEXT = {
 // 失败结果按"出了什么问题 + 怎么办"展示；未知错误再回退 JSON 细节
 const show = (r) => {
   if (r.ok !== false) return typeof r === 'string' ? r : JSON.stringify(r, null, 2);
-  const human = ERR_TEXT[r.error] || '操作失败';
+  // 校验类失败（verify/restore 拦截）没有 error 码，note/summary 本身就是人话主文案
+  const note = typeof (r.note || r.summary) === 'string' ? (r.note || r.summary) : null;
+  const human = ERR_TEXT[r.error] || note || '操作失败';
   const detail = r.summary || r.note || r.error;
-  return '❌ ' + human + (detail && detail !== r.error ? '\\n技术细节: ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '');
+  return '❌ ' + human + (detail && detail !== r.error && detail !== human ? '\\n技术细节: ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '');
 };
 const log = (t) => { document.getElementById('log').textContent = typeof t === 'string' ? t : show(t); };
 const dlg = document.getElementById('confirm');
