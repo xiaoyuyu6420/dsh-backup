@@ -809,16 +809,21 @@ async function main() {
         const mock20 = makeCtx({ home: env20.home, dsh: env20.dsh });
         plugin(mock20.ctx, {});
         const sessDir = path.join(env20.dsh, 'sessions', '--proj--');
-        // 五个会话目录先全部写入健康内容，再备份（归档持健康副本），最后弄坏三个现场
+        // 五个会话目录先全部写入健康内容，再备份（归档持健康副本），最后弄坏四个现场
         const good = makeZstdSessionLog('sess-good');
         const rawLines = makeSessionLogLines('sess-raw');
         // raw 样本只取 header + 两条裸事件（packed 行属 zstd 帧布局，raw 版不带）
         const rawGood = Buffer.from(rawLines.slice(0, 3).join('\n'), 'utf8');
+        // #1047 形态备用：整份合法日志压成单帧（无 zstd 运行时的占位内容无所谓）
+        const singleFrame = typeof zlib.zstdCompressSync === 'function'
+          ? zlib.zstdCompressSync(`${makeSessionLogLines('sess-single').join('\n')}\n`)
+          : Buffer.from('placeholder-zstd-log-sess-single');
         const files = [
           ['enc-good', 'session.jsonl.zstd', good],
           ['raw-good', 'session.jsonl', rawGood],
           ['enc-magic', 'session.jsonl.zstd', good],
           ['enc-trunc', 'session.jsonl.zstd', makeZstdSessionLog('sess-trunc')],
+          ['enc-single', 'session.jsonl.zstd', good],
           ['raw-gap', 'session.jsonl', rawGood],
         ];
         for (const [dirName, fileName, content] of files) {
@@ -827,28 +832,30 @@ async function main() {
         }
         ok((await mock20.tool().execute({ mode: 'backup' }, {})).ok === true, 'doctor 场景备份成功');
 
-        // 弄坏三个现场：坏魔数 / 截断帧 / seq 跳号
+        // 弄坏四个现场：坏魔数 / 截断帧 / 单帧重写（#1047 形态）/ seq 跳号
         await fs.writeFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd'), Buffer.from('definitely not zstd output!!'));
         await fs.writeFile(path.join(sessDir, 'enc-trunc', 'session.jsonl.zstd'), good.subarray(0, good.length - 4));
+        await fs.writeFile(path.join(sessDir, 'enc-single', 'session.jsonl.zstd'), singleFrame);
         await fs.writeFile(
           path.join(sessDir, 'raw-gap', 'session.jsonl'),
           [makeSessionLogLines('x')[0], JSON.stringify({ type: 'user/message', seq: 0 }), JSON.stringify({ type: 'user/message', seq: 2 })].join('\n'),
         );
 
         const scan = await mock20.tool().execute({ mode: 'doctor' }, {});
-        // 运行时自适应：Node ≥22.15/23.8 才有内置 zstd 解码。有 → 3 个损坏全检出；
+        // 运行时自适应：Node ≥22.15/23.8 才有内置 zstd 解码。有 → 4 个损坏全检出；
         // 无（如 Node 20）→ zstd 文件进 skipped、只有 raw 跳号可检出——这正是
         // HAS_NODE_ZSTD 降级路径的实测。
         const { zstdDecompressSync: probe } = await import('node:zlib');
         const zstdOk = typeof probe === 'function';
-        const expectBad = zstdOk ? 3 : 1;
+        const expectBad = zstdOk ? 4 : 1;
         const dump = scan.corrupt.map((c) => `${c.path} ← ${c.reason}`).join(' | ');
         ok(scan.ok === false && scan.corruptCount === expectBad, `扫描检出 ${expectBad} 个损坏（实际 ${scan.corruptCount}）`);
         if (zstdOk) {
           ok(scan.corrupt.some((c) => c.path.includes('enc-magic')), `坏魔数检出: ${dump}`);
           ok(scan.corrupt.some((c) => c.path.includes('enc-trunc')), '截断帧检出');
+          ok(scan.corrupt.some((c) => c.path.includes('enc-single') && c.reason.includes('容器契约')), `单帧重写违反容器契约检出（#1047 形态）: ${dump}`);
         } else {
-          ok(scan.skippedCount === 3, `无 zstd 运行时：3 个 .zstd 全部标记 skipped 而非损坏（实际 ${scan.skippedCount}）`);
+          ok(scan.skippedCount === 4, `无 zstd 运行时：4 个 .zstd 全部标记 skipped 而非损坏（实际 ${scan.skippedCount}）`);
           ok(scan.corrupt.every((c) => !c.path.endsWith('.zstd')), `损坏清单只含 raw 文件: ${dump}`);
           ok(scan.summary.includes('未能深度校验'), '扫描汇总提示 skipped');
         }
@@ -858,11 +865,12 @@ async function main() {
         const cmdScan = await mock20.handler('doctor');
         ok(cmdScan.kind === 'error' && cmdScan.text.includes('/backup doctor --repair'), '命令面 doctor 报告损坏并提示修复用法');
 
-        const repairTargets = zstdOk ? ['enc-magic', 'enc-trunc', 'raw-gap'] : ['raw-gap'];
+        const repairTargets = zstdOk ? ['enc-magic', 'enc-trunc', 'enc-single', 'raw-gap'] : ['raw-gap'];
         const repair = await mock20.tool().execute({ mode: 'doctor', selector: 'latest', repair: true }, {});
         ok(repair.ok === true && repair.repaired.length === expectBad, `定点修复 ${expectBad} 个（实际 ${repair.repaired.length}）`);
         if (zstdOk) {
           ok(await fs.readFile(path.join(sessDir, 'enc-magic', 'session.jsonl.zstd')).then((b) => b.equals(good)), '坏魔数文件已还原为健康字节');
+          ok(await fs.readFile(path.join(sessDir, 'enc-single', 'session.jsonl.zstd')).then((b) => b.equals(good)), '单帧重写文件已还原为多帧健康字节');
         }
         ok(await fs.readFile(path.join(sessDir, 'raw-gap', 'session.jsonl'), 'utf8').then((t) => t === rawGood.toString('utf8')), 'seq 跳号文件已还原');
         let keptCount = 0;
@@ -935,6 +943,13 @@ async function main() {
         const rawGood = Buffer.from(rawLines.slice(0, 3).join('\n'), 'utf8');
         await fs.mkdir(path.join(sessDir, 'enc-a'), { recursive: true });
         await fs.writeFile(path.join(sessDir, 'enc-a', 'session.jsonl.zstd'), good);
+        // enc-single：先写健康多帧（进归档，供 doctor --repair 定点还原），弄坏动作在 doctor 段
+        const { zstdDecompressSync: probe23 } = await import('node:zlib');
+        const zstd23 = typeof probe23 === 'function';
+        if (zstd23) {
+          await fs.mkdir(path.join(sessDir, 'enc-single'), { recursive: true });
+          await fs.writeFile(path.join(sessDir, 'enc-single', 'session.jsonl.zstd'), good);
+        }
         await fs.mkdir(path.join(sessDir, 'raw-b'), { recursive: true });
         await fs.writeFile(path.join(sessDir, 'raw-b', 'session.jsonl'), rawGood);
         await mock23.handler('');
@@ -972,13 +987,22 @@ async function main() {
           srv.kill();
         }
 
-        // doctor：弄坏 raw 文件 → rescue 检出并定点修复
+        // doctor：弄坏 raw 文件 + 单帧重写（#1047 形态，rescue.mjs 的容器契约校验）→ rescue 检出并定点修复
         await fs.writeFile(path.join(sessDir, 'raw-b', 'session.jsonl'), [rawLines[0], JSON.stringify({ type: 'user/message', seq: 0 }), JSON.stringify({ type: 'user/message', seq: 5 })].join('\n'));
+        if (zstd23) {
+          await fs.writeFile(path.join(sessDir, 'enc-single', 'session.jsonl.zstd'), zlib.zstdCompressSync(`${makeSessionLogLines('sess-r2').join('\n')}\n`));
+        }
         const doc = r(['doctor']);
         ok(doc.status === 1 && doc.stdout.includes('raw-b'), `rescue doctor 检出损坏: ${(doc.stdout.match(/❌[^\n]*/) || ['(无)']).join(' ')}`);
+        if (zstd23) {
+          ok(doc.stdout.includes('enc-single') && doc.stdout.includes('容器契约'), `rescue doctor 检出单帧重写（#66）: ${(doc.stdout.match(/❌[^\n]*/) || ['(无)']).join(' ')}`);
+        }
         const rep = r(['doctor', '--repair']);
         ok(rep.status === 0 && rep.stdout.includes('复检全部健康'), `rescue doctor --repair: ${(rep.stdout || rep.stderr).split('\n')[0]}`);
         ok(await fs.readFile(path.join(sessDir, 'raw-b', 'session.jsonl'), 'utf8').then((t) => t === rawGood.toString('utf8')), 'rescue 修复后字节一致');
+        if (zstd23) {
+          ok(await fs.readFile(path.join(sessDir, 'enc-single', 'session.jsonl.zstd')).then((b) => b.equals(good)), 'rescue 单帧重写已还原为多帧健康字节');
+        }
 
         // 空目标机恢复：整个 .dsh 删掉，rescue 独立拉回（vault 凭据还原）
         await fs.rm(env23.dsh, { recursive: true, force: true });

@@ -251,18 +251,31 @@ function walkZstdFrames(buf) {
   return frames;
 }
 
+/**
+ * 解出 .zstd 会话日志的全部逻辑行；任一帧损坏即抛错。同时返回首个数据帧
+ * （zstd 魔数，非 skippable）解出的行数 headerFrameLines——宿主容器契约要求
+ * 首帧恰好一行 SessionHeader，行流拼接校验覆盖不到（#66，与 lib/index.js 同步）。
+ */
 function decodeZstdLog(buf) {
   const parts = [];
   let frameNo = 0;
+  let headerFrameLines;
   for (const [s, e] of walkZstdFrames(buf)) {
     frameNo += 1;
     try {
-      parts.push(zlib.zstdDecompressSync(buf.subarray(s, e)));
+      const out = zlib.zstdDecompressSync(buf.subarray(s, e));
+      parts.push(out);
+      if (headerFrameLines === undefined && buf.readUInt32LE(s) === ZSTD_MAGIC) {
+        headerFrameLines = out.toString('utf8').split('\n').filter((l) => l.length > 0).length;
+      }
     } catch (err) {
       throw new Error(`第 ${frameNo} 帧解压失败：${String(err && err.message ? err.message : err)}`);
     }
   }
-  return Buffer.concat(parts).toString('utf8').split('\n').filter((l) => l.length > 0);
+  return {
+    lines: Buffer.concat(parts).toString('utf8').split('\n').filter((l) => l.length > 0),
+    headerFrameLines,
+  };
 }
 
 function validateSessionLines(lines) {
@@ -329,8 +342,13 @@ async function validateSessionFile(f) {
       return { state: 'skipped', reason: `文件 ${Math.floor(info.size / 1048576)}MB 超过深度校验上限` };
     }
     let lines;
+    let headerFrameLines;
     if (f.abs.endsWith('.zstd')) {
-      lines = decodeZstdLog(await fs.readFile(f.abs));
+      ({ lines, headerFrameLines } = decodeZstdLog(await fs.readFile(f.abs)));
+      // 容器契约（#66/#1047）：首帧必须恰好一行 header，单帧重写形态宿主拒载
+      if (headerFrameLines !== undefined && headerFrameLines !== 1) {
+        return { state: 'bad', reason: `首帧解出 ${headerFrameLines} 行——违反容器契约（首帧应恰好一行 SessionHeader；整份日志被外部工具压成单帧的典型形态，宿主读端会拒载）` };
+      }
     } else {
       lines = (await fs.readFile(f.abs, 'utf8')).split('\n').filter((l) => l.length > 0);
     }
