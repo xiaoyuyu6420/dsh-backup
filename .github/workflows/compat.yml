@@ -28,8 +28,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Enable pnpm
-        run: corepack enable && corepack prepare pnpm@latest --activate
+      - name: Install pnpm
+        run: npm i -g pnpm@11.24.0
 
       - name: Install latest dsh host
         run: npm i -g @deepseek-ai/dsh@latest
