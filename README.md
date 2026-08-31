@@ -53,7 +53,11 @@ dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-Restart `dsh web` afterwards.
+Restart `dsh web` afterwards — the plugin only takes effect after a restart.
+
+> The installer may print `✕ missing peer @deepseek-ai/...` warnings. These are
+> expected: the peer packages are provided by the DSH host at runtime. As long
+> as the command ends with `Done`, the plugin is installed.
 
 ## Quickstart
 
@@ -127,6 +131,7 @@ Tried it? Tell us what broke, what's missing, what you liked — it directly sha
 <details>
 <summary>Recent releases</summary>
 
+- **0.9.1** — feedback entry point in the panel; README overhaul. UX hardening from a six-agent review: restore-confirm button made visible again (missing theme fallback), snapshot self-deletion during snapshot-restore fixed, node discovery for the double-click rescue launcher, friendlier error messages with concrete next steps.
 - **0.9.0** — `/backup doctor` session-log health check with targeted repair; out-of-process rescue channel (`dsh-rescue` / launcher in the backup dir) that works even when the host won't boot; restore auto-rollback with a result-oriented receipt; smart backup: pre-upgrade snapshots on host train changes, quarantine of corrupt session logs before they rotate away, tiered daily/weekly retention.
 - **0.8.0** — edit backup settings right in the panel (destination, retention, exclude patterns), saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of silent overwrite.
 - **0.7.x** — credential redaction with a local vault; cross-machine restore.

@@ -53,7 +53,11 @@ dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-装完重启 `dsh web`。
+装完重启 `dsh web` 后插件才生效。
+
+> 安装时可能刷出 `✕ missing peer @deepseek-ai/...` 警告，属预期现象：这些
+> peer 包由 DSH 宿主在运行时提供，不装在 profile 目录里。只要命令以
+> `Done` 结尾就是装成功了。
 
 ## 快速上手
 
@@ -127,6 +131,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 <details>
 <summary>最近的版本</summary>
 
+- **0.9.1** —— 面板新增反馈入口；README 重做。六路 agent UX 深审后的加固：恢复确认按钮补主题色兜底重新可见、修复恢复快照时自毁目标快照的 bug、双击救援启动器自动探测 node、报错文案全面改为"人话 + 下一步"。
 - **0.9.0** —— `/backup doctor` 会话日志体检与定点修复；宿主起不来也能用的进程外救援通道（备份目录里的 dsh-rescue / 双击启动器）；恢复失败自动回滚与结果导向回执；智能备份：宿主升级前自动快照、损坏会话先隔离再入档、每日/每周分级保留。
 - **0.8.0** —— 面板里直接改备份设置（目录、保留份数、排除模式），立即生效写入 settings.yaml 不用重启；两处同时改有冲突提示，不会静默覆盖。
 - **0.7.x** —— 凭据脱敏（本机 vault）、跨机恢复。

@@ -42,6 +42,17 @@ export function BackupTab({ panel, t }) {
   const [confirmDelete, setConfirmDelete] = useState(null);
   // 分类型备份：本次勾选的类型（空集 = 全量备份）
   const [typeSel, setTypeSel] = useState(() => new Set());
+  const [syncDeps, setSyncDeps] = useState(false);
+
+  // 删除两段式确认的自动复位：误触后不响应也不点确认时，6 秒后回到普通按钮，
+  // 避免"要么删、要么关弹窗"的死角（UX 审查 P1-9）。
+  useEffect(() => {
+    if (confirmDelete === null) return undefined;
+    const timer = setTimeout(() => setConfirmDelete(null), 6000);
+    const onKey = (e) => { if (e.key === 'Escape') setConfirmDelete(null); };
+    window.addEventListener('keydown', onKey);
+    return () => { clearTimeout(timer); window.removeEventListener('keydown', onKey); };
+  }, [confirmDelete]);
 
   // Settings state (from /dsh-backup/settings)
   const [settings, setSettings] = useState(null);
@@ -126,6 +137,9 @@ export function BackupTab({ panel, t }) {
   // 预览刻意不走 run()：dry-run 的 summary 已由弹窗承载，再落横幅会重复。
   const previewRestore = async (name, types) => {
     setPending(null);
+    // 勾选状态在每次打开预览时重置——取消/Esc/背板退出不会走到 confirmRestore，
+    // 残留的勾选会让下一次恢复"默认重装依赖"（review P1-2）
+    setSyncDeps(false);
     setBusy(`restore:${name}`);
     try {
       const r = await panel.restore(name, true, types);
@@ -153,8 +167,10 @@ export function BackupTab({ panel, t }) {
 
   const confirmRestore = () => {
     const target = pending;
+    const withDeps = syncDeps;
     setPending(null);
-    void run(`restore:${target.name}`, () => panel.restore(target.name, false, target.merge ? target.types : undefined)).then(reload);
+    setSyncDeps(false);
+    void run(`restore:${target.name}`, () => panel.restore(target.name, false, target.merge ? target.types : undefined, withDeps)).then(reload);
   };
 
   // 确认弹窗打开时 Esc 取消；恢复执行中（busy）不响应，避免误关丢反馈。
@@ -173,9 +189,10 @@ export function BackupTab({ panel, t }) {
 
   // Settings save/reset
   const saveSettings = async () => {
-    if (!settings) return;
+    if (!settings || settingsInvalid) return;
     setSettingsStatus('saving');
     setSettingsMsg('');
+    const prevDestination = settings.destination || '';
     const keep = Number(keepInput);
     const exclude = excludeInput.split(',').map((s) => s.trim()).filter(Boolean);
     try {
@@ -199,13 +216,18 @@ export function BackupTab({ panel, t }) {
       }
       if (!res.ok || data.error) {
         setSettingsStatus('error');
-        setSettingsMsg(data.error === 'invalid-field' ? t('settingsInvalid') : String(data.error));
+        // 宿主会返回 invalid-field + fields 名单——原样渲染字段名，别让"以下字段"空着
+        setSettingsMsg(data.error === 'invalid-field'
+          ? (Array.isArray(data.fields) && data.fields.length
+            ? t('settingsInvalidFields').replace('{fields}', data.fields.join(', '))
+            : t('settingsInvalid'))
+          : String(data.error));
         return;
       }
       applySettings(data);
       setSettingsStatus('saved');
-      setSettingsMsg('');
-      setTimeout(() => setSettingsStatus(''), 2000);
+      setSettingsMsg(prevDestination !== destInput.trim() ? t('settingsMovedHint') : '');
+      setTimeout(() => setSettingsStatus(''), 4000);
     } catch {
       setSettingsStatus('error');
       setSettingsMsg(t('settingsSaveError'));
@@ -252,6 +274,17 @@ export function BackupTab({ panel, t }) {
     else if (field === 'keep') setKeepInput(value);
     else if (field === 'exclude') setExcludeInput(value);
   };
+
+  // 保存前客户端校验：给出 inline 原因，而不是静默禁用保存按钮
+  // （UX 审查 P1-8：按钮变灰无提示，同屏还挂着旧的"已保存"）。
+  const settingsErrors = [];
+  if (settingsDirty && destInput.trim() && /[<>"|?\u0000-\u001f]/.test(destInput)) {
+    settingsErrors.push(t('settingsDestInvalid'));
+  }
+  if (settingsDirty && keepInput !== '' && (!/^\d+$/.test(keepInput) || Number(keepInput) < 1 || Number(keepInput) > 999)) {
+    settingsErrors.push(t('settingsKeepInvalid'));
+  }
+  const settingsInvalid = settingsErrors.length > 0;
 
   const githubTone = github === null || github.repo === null
     ? undefined
@@ -305,6 +338,7 @@ export function BackupTab({ panel, t }) {
                       className="dsb-input"
                       min="1"
                       max="999"
+                      aria-label={t('keepAria')}
                       value={keepInput}
                       onChange={(e) => onSettingsFieldChange('keep', e.target.value)}
                     />
@@ -325,7 +359,7 @@ export function BackupTab({ panel, t }) {
                   <button
                     type="button"
                     className="dsb-btn-primary"
-                    disabled={!settingsDirty || settingsStatus === 'saving'}
+                    disabled={!settingsDirty || settingsInvalid || settingsStatus === 'saving'}
                     onClick={saveSettings}
                   >
                     {settingsStatus === 'saving' ? t('busy') : t('save')}
@@ -339,12 +373,19 @@ export function BackupTab({ panel, t }) {
                     {t('reset')}
                   </button>
                   {settingsStatus === 'saved' ? (
-                    <span className="dsb-status-ok">{t('settingsSaved')}</span>
+                    <span className="dsb-status-ok">
+                      {t('settingsSaved')}{settingsMsg ? ` ${settingsMsg}` : ''}
+                    </span>
                   ) : null}
                   {settingsStatus === 'error' ? (
                     <span className="dsb-status-error">{settingsMsg}</span>
                   ) : null}
                 </div>
+                {settingsInvalid ? (
+                  <ul className="dsb-settings-errors" role="alert">
+                    {settingsErrors.map((s) => <li key={s}>{s}</li>)}
+                  </ul>
+                ) : null}
                 <p className="dsb-hint" style={{ marginTop: '6px' }}>{t('settingsSourceHint')}</p>
               </>
             ) : null}
@@ -489,7 +530,16 @@ export function BackupTab({ panel, t }) {
                     {pending.preflight.map((s) => <li key={s}>{s}</li>)}
                   </ul>
                 ) : null}
-                <p className="dsb-status">{t('restartHint')}</p>
+                <label className="dsb-syncdeps">
+                  <input
+                    type="checkbox"
+                    checked={syncDeps}
+                    disabled={busy !== ''}
+                    onChange={(e) => setSyncDeps(e.target.checked)}
+                  />
+                  {t('syncDepsLabel')}
+                </label>
+                <p className="dsb-status">{syncDeps ? t('restartHintDeps') : t('restartHint')}</p>
                 <div className="dsb-row dsb-modal-actions">
                   <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={() => setPending(null)}>
                     {t('cancel')}
@@ -534,6 +584,8 @@ export function BackupTab({ panel, t }) {
                         <button
                           type="button" className="dsb-btn-danger"
                           disabled={busy !== ''} onClick={() => deleteOne(b.name)}
+                          title={t('confirmDeleteName').replace('{name}', b.name)}
+                          aria-label={t('confirmDeleteName').replace('{name}', b.name)}
                         >
                           {busy === `delete:${b.name}` ? t('busy') : t('confirmDelete')}
                         </button>
@@ -541,6 +593,7 @@ export function BackupTab({ panel, t }) {
                         <button
                           type="button" className="dsb-btn-danger"
                           disabled={busy !== ''} onClick={() => setConfirmDelete(b.name)}
+                          title={t('confirmDeleteName').replace('{name}', b.name)}
                         >
                           {t('delete')}
                         </button>
