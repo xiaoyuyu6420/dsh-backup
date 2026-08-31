@@ -131,6 +131,7 @@ Tried it? Tell us what broke, what's missing, what you liked — it directly sha
 <details>
 <summary>Recent releases</summary>
 
+- **0.10.0** — typed backups: back up just what you need (`/backup --types skills,sessions`) and merge-restore a subset (`/backup restore <archive> --types skills`); per-type archives rotate in their own bucket. Credential-type archives stay out of GitHub sync; cross-machine guardrails unchanged.
 - **0.9.1** — feedback entry point in the panel; README overhaul. UX hardening from a six-agent review: restore-confirm button made visible again (missing theme fallback), snapshot self-deletion during snapshot-restore fixed, node discovery for the double-click rescue launcher, friendlier error messages with concrete next steps.
 - **0.9.0** — `/backup doctor` session-log health check with targeted repair; out-of-process rescue channel (`dsh-rescue` / launcher in the backup dir) that works even when the host won't boot; restore auto-rollback with a result-oriented receipt; smart backup: pre-upgrade snapshots on host train changes, quarantine of corrupt session logs before they rotate away, tiered daily/weekly retention.
 - **0.8.0** — edit backup settings right in the panel (destination, retention, exclude patterns), saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of silent overwrite.
