@@ -238,12 +238,9 @@ function walkZstdFrames(buf) {
       frames.push([off, pos]);
       off = pos;
     } else if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
-      if (buf.length - off < 8) throw new Error('skippable 帧头截断');
-      const size = buf.readUInt32LE(off + 4);
-      const end = off + 8 + size;
-      if (end > buf.length) throw new Error('skippable 帧数据越界');
-      frames.push([off, end]);
-      off = end;
+      // 宿主 scanZstdFrames 拒绝一切非数据帧魔数——容忍 skippable 会造成
+      // 「doctor 报 OK、宿主整体拒载」（#66，与 lib/index.js 同步）
+      throw new Error('遇 skippable 帧——宿主读端不支持任何非数据帧魔数，整个文件将被拒载');
     } else {
       throw new Error(`偏移 ${off} 处不是 zstd 帧魔数`);
     }
@@ -251,18 +248,32 @@ function walkZstdFrames(buf) {
   return frames;
 }
 
+/**
+ * 解出 .zstd 会话日志的全部逻辑行；任一帧损坏即抛错。同时对首个数据帧做
+ * 宿主容器契约判定 headerFrameOk——宿主 assertZstdHeaderFrame 是字节精确的：
+ * 首帧解出必须非空、且首个换行符恰在最后一个字节（「恰好一行、单个 \n 结尾」）。
+ * 行流拼接校验覆盖不到这条（#66，与 lib/index.js 同步）。
+ */
 function decodeZstdLog(buf) {
   const parts = [];
   let frameNo = 0;
+  let headerFrameOk;
   for (const [s, e] of walkZstdFrames(buf)) {
     frameNo += 1;
     try {
-      parts.push(zlib.zstdDecompressSync(buf.subarray(s, e)));
+      const out = zlib.zstdDecompressSync(buf.subarray(s, e));
+      parts.push(out);
+      if (headerFrameOk === undefined) {
+        headerFrameOk = out.length > 0 && out.indexOf(10) === out.length - 1;
+      }
     } catch (err) {
       throw new Error(`第 ${frameNo} 帧解压失败：${String(err && err.message ? err.message : err)}`);
     }
   }
-  return Buffer.concat(parts).toString('utf8').split('\n').filter((l) => l.length > 0);
+  return {
+    lines: Buffer.concat(parts).toString('utf8').split('\n').filter((l) => l.length > 0),
+    headerFrameOk,
+  };
 }
 
 function validateSessionLines(lines) {
@@ -329,8 +340,13 @@ async function validateSessionFile(f) {
       return { state: 'skipped', reason: `文件 ${Math.floor(info.size / 1048576)}MB 超过深度校验上限` };
     }
     let lines;
+    let headerFrameOk;
     if (f.abs.endsWith('.zstd')) {
-      lines = decodeZstdLog(await fs.readFile(f.abs));
+      ({ lines, headerFrameOk } = decodeZstdLog(await fs.readFile(f.abs)));
+      // 容器契约（#66/#1047）：首帧必须解出「恰好一行 header、单个换行结尾」
+      if (headerFrameOk === false) {
+        return { state: 'bad', reason: '首帧不是恰好一行 header——违反容器契约（首帧应解出一行 SessionHeader 且以单个换行结尾；单帧重写/多余空行/缺行尾的典型形态，宿主读端会拒载）' };
+      }
     } else {
       lines = (await fs.readFile(f.abs, 'utf8')).split('\n').filter((l) => l.length > 0);
     }
