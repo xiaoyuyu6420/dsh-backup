@@ -112,6 +112,7 @@ const setGithubRepoSchema = z.object({
 const keepParam = { name: 'keep', wire: 'keep', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#keep', schema: z.number().int().positive().optional() }, acceptsUndefined: true };
 const selectorParam = { name: 'selector', wire: 'selector', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#selector', schema: z.string().optional() }, acceptsUndefined: true };
 const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#dryRun', schema: z.boolean().optional() }, acceptsUndefined: true };
+const syncDepsParam = { name: 'syncDeps', wire: 'syncDeps', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#syncDeps', schema: z.boolean().optional() }, acceptsUndefined: true };
 const hoursParam = { name: 'hours', wire: 'hours', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#hours', schema: z.number().int().min(0).max(720) }, acceptsUndefined: true };
 const repoParam = { name: 'repo', wire: 'repo', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#repo', schema: z.string().optional() }, acceptsUndefined: true };
 
@@ -139,7 +140,7 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('status', [], statusSchema, false),
     strictDescriptor('backup', [keepParam], backupSchema, true),
     strictDescriptor('verify', [selectorParam], verifySchema, true),
-    strictDescriptor('restore', [selectorParam, dryRunParam], restoreSchema, true),
+    strictDescriptor('restore', [selectorParam, dryRunParam, syncDepsParam], restoreSchema, true),
     strictDescriptor('setAuto', [hoursParam], setAutoSchema, false),
     strictDescriptor('githubStatus', [], githubStatusSchema, false),
     strictDescriptor('githubSyncNow', [], githubSyncSchema, true),
@@ -152,7 +153,9 @@ export const BACKUP_REMOTE = Object.freeze({
 function unwrap(result) {
   if (!result.ok) {
     const err = result.error;
-    throw new Error(err && err.message ? `${err.code}: ${err.message}` : 'backupPanel 调用失败');
+    // 机器错误码不直接面向用户：给人话 + 折叠技术细节（文案审计 W3）
+    const raw = err && err.message ? `${err.code}: ${err.message}` : 'backupPanel 调用失败';
+    throw new Error(`操作没有完成：面板暂时连不上后台，请重试；若反复出现请重启 dsh web（技术细节: ${raw}）`);
   }
   return result.value;
 }
@@ -195,7 +198,7 @@ export function apply(ctx) {
       status: async () => unwrap(await ns().status()),
       backup: async (keep) => unwrap(await ns().backup(keep)),
       verify: async (selector) => unwrap(await ns().verify(selector)),
-      restore: async (selector, dryRun) => unwrap(await ns().restore(selector, dryRun)),
+      restore: async (selector, dryRun, syncDeps) => unwrap(await ns().restore(selector, dryRun, syncDeps)),
       setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
       githubStatus: async () => unwrap(await ns().githubStatus()),
       githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
