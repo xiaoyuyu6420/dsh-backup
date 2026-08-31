@@ -33,6 +33,11 @@ const statusSchema = z.object({
     name: z.string(),
     size: z.number().int().nullable(),
   })),
+  typedBackups: z.array(z.object({
+    name: z.string(),
+    size: z.number().int().nullable(),
+    types: z.array(z.string()),
+  })).optional(),
 });
 
 const backupSchema = z.object({
@@ -42,6 +47,8 @@ const backupSchema = z.object({
   sha: z.string(),
   stale: z.number().int(),
   keep: z.number().int(),
+  types: z.array(z.string()).optional(),
+  hasCredentials: z.boolean().optional(),
 });
 
 const verifySchema = z.object({
@@ -66,6 +73,12 @@ const restoreSchema = z.object({
   // 恢复预检提示（🔐凭据/📦依赖/⚠️跨机）与目标是否已有数据——预览弹窗渲染用
   preflight: z.array(z.string()).optional(),
   targetExists: z.boolean().nullable().optional(),
+  // 分类型 merge 恢复（types 非空时出现）
+  merge: z.boolean().optional(),
+  types: z.array(z.string()).optional(),
+  willOverwrite: z.array(z.string()).optional(),
+  restored: z.number().int().optional(),
+  kept: z.array(z.string()).optional(),
 });
 
 const setAutoSchema = z.object({
@@ -115,6 +128,7 @@ const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: { m
 const syncDepsParam = { name: 'syncDeps', wire: 'syncDeps', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#syncDeps', schema: z.boolean().optional() }, acceptsUndefined: true };
 const hoursParam = { name: 'hours', wire: 'hours', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#hours', schema: z.number().int().min(0).max(720) }, acceptsUndefined: true };
 const repoParam = { name: 'repo', wire: 'repo', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#repo', schema: z.string().optional() }, acceptsUndefined: true };
+const typesParam = { name: 'types', wire: 'types', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#types', schema: z.array(z.string()).optional() }, acceptsUndefined: true };
 
 function strictDescriptor(method, parameters, schema, cancellation) {
   return Object.freeze({
@@ -138,9 +152,9 @@ export const BACKUP_REMOTE = Object.freeze({
   package: 'dsh-backup',
   descriptors: Object.freeze([
     strictDescriptor('status', [], statusSchema, false),
-    strictDescriptor('backup', [keepParam], backupSchema, true),
+    strictDescriptor('backup', [keepParam, typesParam], backupSchema, true),
     strictDescriptor('verify', [selectorParam], verifySchema, true),
-    strictDescriptor('restore', [selectorParam, dryRunParam, syncDepsParam], restoreSchema, true),
+    strictDescriptor('restore', [selectorParam, dryRunParam, typesParam, syncDepsParam], restoreSchema, true),
     strictDescriptor('setAuto', [hoursParam], setAutoSchema, false),
     strictDescriptor('githubStatus', [], githubStatusSchema, false),
     strictDescriptor('githubSyncNow', [], githubSyncSchema, true),
@@ -196,9 +210,9 @@ export function apply(ctx) {
     const ns = () => scope.remote.backupPanel;
     const panel = {
       status: async () => unwrap(await ns().status()),
-      backup: async (keep) => unwrap(await ns().backup(keep)),
+      backup: async (keep, types) => unwrap(await ns().backup(keep, types)),
       verify: async (selector) => unwrap(await ns().verify(selector)),
-      restore: async (selector, dryRun, syncDeps) => unwrap(await ns().restore(selector, dryRun, syncDeps)),
+      restore: async (selector, dryRun, types, syncDeps) => unwrap(await ns().restore(selector, dryRun, types, syncDeps)),
       setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
       githubStatus: async () => unwrap(await ns().githubStatus()),
       githubSyncNow: async () => unwrap(await ns().githubSyncNow()),

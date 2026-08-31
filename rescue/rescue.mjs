@@ -104,7 +104,7 @@ async function listBackups(root) {
   }
   const backups = [];
   for (const d of dirents) {
-    if (!d.name.startsWith('dsh-') || d.name.startsWith('dsh-pre-restore-') || !d.name.endsWith('.tar.gz')) continue;
+    if (!d.name.startsWith('dsh-') || d.name.startsWith('dsh-pre-restore-') || d.name.startsWith('dsh-t-') || !d.name.endsWith('.tar.gz')) continue;
     let size;
     try {
       size = (await fs.stat(`${root}/${d.name}`)).size;
@@ -430,6 +430,11 @@ async function restoreArchive(root, selector, apply) {
   const parent = dshHome.slice(0, -(base.length + 1)) || '/';
   const entries = safeEntries(run(['tar', '-tvzf', picked.name], root), base);
   const { meta, redactedFiles } = await readArchiveMeta(root, picked.name);
+  // 分类型归档是子集，整包恢复会挪旁 ~/.dsh 后只解压子集 → 丢失未包含的类型
+  // 数据。灾时请用全量归档（dsh-）整包恢复；分类型恢复走 dsh 的 --types。
+  if (meta && Array.isArray(meta.types) && meta.types.length) {
+    throw new Error(`${picked.name} 是分类型归档（${meta.types.join(', ')}），整包恢复会丢失其他类型数据。请选一份全量归档（dsh- 开头）整包恢复，或用 dsh 的「/backup restore ${picked.name} --types ${meta.types.join(',')}」分类型恢复。`);
+  }
   const home = userHome();
   const preflight = [];
   if (meta && typeof meta.home === 'string' && home && meta.home !== home) {

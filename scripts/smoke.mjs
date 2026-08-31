@@ -1101,6 +1101,125 @@ async function main() {
       }
     }
 
+    console.log('25) 分类型备份（--types 子集 + dsh-t- 前缀 + 凭据明文 + 独立轮换）');
+    {
+      const tdir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-typed-'));
+      const thome = path.join(tdir, 'home');
+      const troot = `${thome}/Desktop/dsh-backups`;
+      const tdsh = path.join(thome, '.dsh');
+      await fs.mkdir(path.join(tdsh, 'skills'), { recursive: true });
+      await fs.mkdir(path.join(tdsh, 'sessions'), { recursive: true });
+      await fs.mkdir(path.join(tdsh, 'profiles', 'web'), { recursive: true });
+      await fs.mkdir(path.join(tdsh, 'node_modules', 'x'), { recursive: true });
+      await fs.writeFile(path.join(tdsh, 'skills', 'a.md'), 'skill-a');
+      await fs.writeFile(path.join(tdsh, 'sessions', 's.log'), 'sess');
+      await fs.writeFile(path.join(tdsh, 'settings.yaml'), 'k: v');
+      await fs.writeFile(path.join(tdsh, '.credentials.yaml'), 'api-key: secret');
+      await fs.writeFile(path.join(tdsh, 'cordis.patch.yml'), 'plugins: [mcp]');
+      await fs.writeFile(path.join(tdsh, 'profiles', 'web', 'cordis.yml'), 'mcp: yes');
+      await fs.writeFile(path.join(tdsh, 'profiles', 'web', 'package.json'), '{}');
+      await fs.writeFile(path.join(tdsh, 'node_modules', 'x', 'j.js'), 'junk');
+      try {
+        const tmock = makeCtx({ home: thome, dsh: tdsh });
+        plugin(tmock.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        const trun = tmock.handler;
+        const typedNames = async () => (await fs.readdir(troot)).filter((n) => n.startsWith('dsh-t-') && n.endsWith('.tar.gz')).sort();
+        const fullNames = async () => (await fs.readdir(troot)).filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-t-') && !n.startsWith('dsh-pre-') && n.endsWith('.tar.gz')).sort();
+
+        // skills 单类型：dsh-t- 前缀、只含 skills 子树
+        const ts1 = await trun('--types skills');
+        ok(ts1.kind === 'success', `--types skills 备份成功: ${ts1.text?.split('\n')[0] ?? ts1.text}`);
+        const s1 = (await typedNames())[0];
+        ok(Boolean(s1) && s1.startsWith('dsh-t-'), `类型归档用 dsh-t- 前缀（实际 ${s1}）`);
+        const e1 = await tarList(troot, s1);
+        ok(e1.some((e) => e.includes('skills/a.md')), 'skills 归档含 skills/a.md');
+        ok(!e1.some((e) => e.includes('settings.yaml') || e.includes('.credentials.yaml') || e.includes('node_modules') || e.includes('sessions')), 'skills 归档只含 skills 子树');
+        const m1 = JSON.parse(await fs.readFile(`${troot}/${s1}.meta.json`, 'utf8'));
+        ok(Array.isArray(m1.types) && m1.types.length === 1 && m1.types[0] === 'skills' && m1.hasCredentials === false, 'meta.types=[skills], hasCredentials=false');
+
+        // credentials 类型：凭据明文进归档（反转脱敏）
+        const ts2 = await trun('--only credentials');
+        ok(ts2.kind === 'success', `--only credentials 备份成功: ${ts2.text?.split('\n')[0] ?? ts2.text}`);
+        const s2 = (await typedNames()).find((n) => n !== s1);
+        const e2 = await tarList(troot, s2);
+        ok(e2.some((e) => e.includes('.credentials.yaml')), 'credentials 归档含明文凭据文件');
+        const credBody = await new Promise((resolve) => {
+          const c = spawn('tar', ['-xzf', s2, '-O', '.dsh/.credentials.yaml'], { cwd: troot, stdio: ['ignore', 'pipe', 'ignore'] });
+          let b = ''; c.stdout.on('data', (d) => { b += d; }); c.on('close', () => resolve(b));
+        });
+        ok(credBody === 'api-key: secret', `凭据明文进归档（实际: ${JSON.stringify(credBody)}`);
+        const m2 = JSON.parse(await fs.readFile(`${troot}/${s2}.meta.json`, 'utf8'));
+        ok(m2.hasCredentials === true, 'credentials 归档 hasCredentials=true（githubSync 据此跳过上云）');
+
+        // mcp 类型：glob 展开承载文件
+        const ts3 = await trun('--types mcp');
+        ok(ts3.kind === 'success', `--types mcp 备份成功`);
+        const s3 = (await typedNames()).find((n) => n !== s1 && n !== s2);
+        const e3 = await tarList(troot, s3);
+        ok(e3.some((e) => e.includes('cordis.patch.yml')) && e3.some((e) => e.includes('profiles/web/cordis.yml')), 'mcp 归档含家级 cordis.patch.yml 与 profiles/web/cordis.yml（glob 展开）');
+
+        // listBackups 不含 dsh-t-（旧版/全量视角不可见——安全降级）
+        const listR = await trun('list');
+        ok(!listR.text.includes('dsh-t-'), `list 不显示类型归档（旧版不可见不误删）: ${listR.text.split('\n').slice(0, 2).join(' | ')}`);
+
+        // 全量备份仍正常（dsh- 前缀，与 dsh-t- 分桶；凭据脱敏不含明文）
+        const ts4 = await trun('');
+        ok(ts4.kind === 'success', `全量备份仍成功`);
+        const f4 = (await fullNames())[0];
+        ok(Boolean(f4), `全量归档独立于类型归档（dsh- 前缀分桶）`);
+        const e4 = await tarList(troot, f4);
+        ok(e4.some((e) => e.includes('settings.yaml')) && e4.some((e) => e.includes('skills/a.md')) && e4.some((e) => e.includes('sessions/s.log')), '全量归档含全部内容');
+        ok(!e4.some((e) => e.includes('.credentials.yaml')), '全量归档脱敏不含凭据明文（向后兼容现有行为）');
+        const m4 = JSON.parse(await fs.readFile(`${troot}/${f4}.meta.json`, 'utf8'));
+        ok(!('types' in m4), '全量归档 meta 无 types 字段（旧归档向后兼容）');
+      } finally {
+        await fs.rm(tdir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('26) 分类型恢复（merge：只恢复选中类型，其他类型不动 + 留档回滚）');
+    {
+      const mdir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-merge-'));
+      const mhome = path.join(mdir, 'home');
+      const mroot = `${mhome}/Desktop/dsh-backups`;
+      const mdsh = path.join(mhome, '.dsh');
+      await fs.mkdir(path.join(mdsh, 'skills'), { recursive: true });
+      await fs.mkdir(path.join(mdsh, 'sessions'), { recursive: true });
+      await fs.writeFile(path.join(mdsh, 'skills', 'a.md'), 'ORIG-skill');
+      await fs.writeFile(path.join(mdsh, 'sessions', 's.log'), 'ORIG-sess');
+      await fs.writeFile(path.join(mdsh, 'settings.yaml'), 'k: orig');
+      try {
+        const mmock = makeCtx({ home: mhome, dsh: mdsh });
+        plugin(mmock.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        const mrun = mmock.handler;
+        await mrun('');
+        const fullAr = (await fs.readdir(mroot)).find((n) => n.startsWith('dsh-') && !n.startsWith('dsh-t-') && !n.startsWith('dsh-pre-') && n.endsWith('.tar.gz'));
+        // 篡改：skills 改、sessions 删、settings 改
+        await fs.writeFile(path.join(mdsh, 'skills', 'a.md'), 'TAMPERED');
+        await fs.rm(path.join(mdsh, 'sessions', 's.log'));
+        await fs.writeFile(path.join(mdsh, 'settings.yaml'), 'k: tampered');
+        // dry-run 预览 merge skills
+        const dr = await mrun(`restore ${fullAr} --types skills --dry-run`);
+        ok(dr.kind === 'success' && dr.text.includes('分类型恢复预览'), `merge dry-run 预览: ${dr.kind === 'success' ? dr.text.split('\n')[0] : dr.text}`);
+        ok(dr.text.includes('覆盖现有 1 个'), `预览提示将覆盖 skills/a.md: ${dr.text.split('\n').find((l) => l.includes('覆盖')) ?? ''}`);
+        // 真实 merge skills
+        const rr = await mrun(`restore ${fullAr} --types skills`);
+        ok(rr.kind === 'success' && rr.text.includes('分类型恢复完成'), `merge 成功: ${rr.kind === 'success' ? rr.text.split('\n')[0] : rr.text}`);
+        // skills 恢复为归档内容（merge 命中）
+        ok(await fs.readFile(path.join(mdsh, 'skills', 'a.md'), 'utf8') === 'ORIG-skill', 'skills/a.md 恢复为归档内容');
+        // 其他类型不被触碰：sessions 仍删除、settings 仍篡改值
+        ok(await fs.stat(path.join(mdsh, 'sessions', 's.log')).then(() => false, () => true), 'sessions/s.log 未被 merge 触碰（仍删除）');
+        ok(await fs.readFile(path.join(mdsh, 'settings.yaml'), 'utf8') === 'k: tampered', 'settings.yaml 未被 merge 触碰（仍篡改值）');
+        // 留档：被覆盖的 skills/a.md 留了 .pre-merge-*（内容是覆盖前的 TAMPERED）
+        const skillDir = await fs.readdir(path.join(mdsh, 'skills'));
+        const keep = skillDir.find((n) => n.startsWith('a.md.pre-merge-'));
+        ok(Boolean(keep), '覆盖前留档 .pre-merge-* 存在');
+        if (keep) ok(await fs.readFile(path.join(mdsh, 'skills', keep), 'utf8') === 'TAMPERED', '留档内容是覆盖前的篡改值');
+      } finally {
+        await fs.rm(mdir, { recursive: true, force: true });
+      }
+    }
+
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
   } finally {

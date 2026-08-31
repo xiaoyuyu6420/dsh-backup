@@ -272,6 +272,20 @@ async function main() {
     }
     const bk = await rpc('backup');
     check('RPC backup 成功', bk?.ok === true, JSON.stringify(bk).slice(0, 160));
+
+    // 分类型备份：RPC 带 types → dsh-t- 子集归档 + status.typedBackups 可见
+    fs.mkdirSync(path.join(home, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'skills', 'e2e.md'), 'typed-e2e');
+    const bkT = await rpc('backup', { types: ['skills'] });
+    check('RPC 分类型备份(types=skills)成功', bkT?.ok === true && Array.isArray(bkT?.types) && bkT.types.includes('skills'), JSON.stringify(bkT).slice(0, 160));
+    const typedName = path.basename(String(bkT?.path ?? ''));
+    check('分类型归档用 dsh-t- 前缀', typedName.startsWith('dsh-t-') && typedName.endsWith('.tar.gz'), typedName);
+    const stT = await rpc('status');
+    check('status.typedBackups 列出分类型归档', Array.isArray(stT?.typedBackups) && stT.typedBackups.some((b) => b.name === typedName && (b.types ?? []).includes('skills')), JSON.stringify(stT?.typedBackups ?? []).slice(0, 160));
+    check('全量列表不含分类型归档（旧版视角不可见）', Array.isArray(stT?.backups) && !stT.backups.some((b) => b.name.startsWith('dsh-t-')), JSON.stringify(stT?.backups ?? []).slice(0, 120));
+    const rsT = await rpc('restore', { selector: typedName, dryRun: true, types: ['skills'] });
+    check('分类型恢复 dry-run 返回 merge 预览', rsT?.ok === true && rsT?.dryRun === true && rsT?.merge === true, JSON.stringify(rsT).slice(0, 200));
+
     fs.writeFileSync(path.join(sessRoot, 'enc-bad', 'session.jsonl.zstd'), Buffer.from('corrupt payload, not zstd'));
 
     const scan = await rpc('doctorScan');
