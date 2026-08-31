@@ -133,9 +133,9 @@ async function verifyOne(root, name) {
   try {
     expected = (await fs.readFile(`${root}/${name}.sha256`, 'utf8')).trim().split(/\s+/)[0];
   } catch { /* 边车缺失 */ }
-  if (!/^[0-9a-f]{64}$/.test(expected)) return { name, ok: false, note: '缺少或无效的 .sha256 边车文件' };
+  if (!/^[0-9a-f]{64}$/.test(expected)) return { name, ok: false, note: '缺少或无效的配套校验文件（.sha256）——无法确认这份备份是否完好' };
   const actual = await sha256File(`${root}/${name}`);
-  return { name, ok: actual === expected, note: actual === expected ? '完整' : 'sha256 不匹配（归档已损坏）' };
+  return { name, ok: actual === expected, note: actual === expected ? '完整' : '校验和不匹配（归档或校验文件之一可能损坏）' };
 }
 
 async function pickArchive(root, selector) {
@@ -547,8 +547,25 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
   <button class="danger" id="confirmGo">确认恢复</button></div></dialog>
 <p class="note">恢复是整体替换：现有数据会先自动快照再挪到一旁（.dsh.pre-restore-*），凭据从本机 vault 补回。只监听本机回环地址。</p>
 <script>
-const log = (t) => { document.getElementById('log').textContent = typeof t === 'string' ? t : JSON.stringify(t, null, 2); };
+const ERR_TEXT = {
+  'not-found': '接口不存在（可能是浏览器缓存了旧页面），请刷新后重试',
+  'missing-rescue-header': '页面安全校验未通过，请刷新页面后重试',
+  'confirm-required': '该操作需要先在确认框里确认',
+  'unknown-op': '未知的操作类型，请刷新页面后重试',
+  'bad-json': '请求内容无法解析，请刷新页面后重试',
+  'too-large': '请求内容过大',
+  'no-archive': '备份目录里没有可用的归档，请先确认备份目录位置',
+};
+// 失败结果按"出了什么问题 + 怎么办"展示；未知错误再回退 JSON 细节
+const show = (r) => {
+  if (r.ok !== false) return typeof r === 'string' ? r : JSON.stringify(r, null, 2);
+  const human = ERR_TEXT[r.error] || '操作失败';
+  const detail = r.summary || r.note || r.error;
+  return '❌ ' + human + (detail && detail !== r.error ? '\\n技术细节: ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : '');
+};
+const log = (t) => { document.getElementById('log').textContent = typeof t === 'string' ? t : show(t); };
 const dlg = document.getElementById('confirm');
+const fmtSize = (n) => typeof n !== 'number' ? '?' : n >= 1048576 ? (n/1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n/1024)) + 'KB';
 async function api(op, body) {
   const res = await fetch('/api/' + op, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dsh-Rescue': '1' }, body: JSON.stringify(body || {}) });
   return res.json();
@@ -556,7 +573,7 @@ async function api(op, body) {
 async function renderList() {
   const r = await api('list');
   if (!r.ok) { log(r); return; }
-  const rows = r.backups.map(b => '<tr><td>' + b.name + '</td><td>' + (b.size ? (b.size/1048576).toFixed(1) + 'MB' : '?') +
+  const rows = r.backups.map(b => '<tr><td>' + b.name + '</td><td>' + fmtSize(b.size) +
     '</td><td><button onclick="verify(\\'' + b.name + '\\')">校验</button> ' +
     '<button class="danger" onclick="restore(\\'' + b.name + '\\')">恢复…</button></td></tr>').join('');
   document.getElementById('list').innerHTML = r.backups.length

@@ -98,8 +98,8 @@ const PANEL_CSS = `
   color: var(--dsw-alias-state-business-primary);
 }
 [data-dsh-backup] .dsb-badge[data-tone='warn'] {
-  background: color-mix(in srgb, var(--dsw-alias-label-error) 12%, transparent);
-  color: var(--dsw-alias-label-error);
+  background: color-mix(in srgb, var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444)) 12%, transparent);
+  color: var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444));
 }
 
 /* ── 按钮 ─────────────────────────────────────────────── */
@@ -127,9 +127,11 @@ const PANEL_CSS = `
   color: var(--dsw-alias-bg-layer-3);
 }
 [data-dsh-backup] .dsb-btn-danger {
-  border-color: color-mix(in srgb, var(--dsw-alias-label-error) 45%, transparent);
+  /* 宿主 theme 未定义 --dsw-alias-label-error（P0 实测：白字白底隐形），
+     fallback 链落到宿主确实定义的 static-red，再兜底手写红 */
+  border-color: color-mix(in srgb, var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444)) 45%, transparent);
   background: none;
-  color: var(--dsw-alias-label-error);
+  color: var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444));
 }
 [data-dsh-backup] button:disabled {
   opacity: 0.4;
@@ -264,8 +266,8 @@ const PANEL_CSS = `
   color: var(--dsw-alias-label-primary);
 }
 [data-dsh-backup] .dsb-banner[data-ok='false'] {
-  border-color: color-mix(in srgb, var(--dsw-alias-label-error) 45%, transparent);
-  color: var(--dsw-alias-label-error);
+  border-color: color-mix(in srgb, var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444)) 45%, transparent);
+  color: var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444));
 }
 
 /* ── 恢复确认弹窗 ─────────────────────────────────────── */
@@ -307,13 +309,13 @@ const PANEL_CSS = `
 [data-dsh-backup] .dsb-warn {
   margin: 0;
   padding: 10px 12px;
-  border: 1px dashed color-mix(in srgb, var(--dsw-alias-label-error) 45%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444)) 45%, transparent);
   border-radius: 10px;
 }
 [data-dsh-backup] .dsb-warn p {
   margin: 0 0 6px;
   font-weight: 600;
-  color: var(--dsw-alias-label-error);
+  color: var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444));
 }
 [data-dsh-backup] .dsb-warn ul {
   margin: 0;
@@ -338,7 +340,8 @@ const PANEL_CSS = `
   margin-top: 4px;
 }
 [data-dsh-backup] .dsb-btn-danger-solid {
-  background: var(--dsw-alias-label-error);
+  /* 同 dsb-btn-danger：宿主缺 --dsw-alias-label-error，必须有 fallback 否则按钮隐形 */
+  background: var(--dsw-alias-label-error, var(--dsw-static-red-600, #ec1313));
   color: #fff;
 }
 [data-dsh-backup] .dsb-btn-danger-solid:hover:not(:disabled) {
@@ -368,6 +371,25 @@ const PANEL_CSS = `
   font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
   line-height: 1.4;
+}
+[data-dsh-backup] .dsb-settings-errors {
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-error, var(--dsw-static-red-500, #ef4444));
+}
+[data-dsh-backup] .dsb-syncdeps {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary, inherit);
+}
+[data-dsh-backup] .dsb-syncdeps input {
+  accent-color: var(--dsw-alias-brand-primary, #4176e6);
 }
 [data-dsh-backup] .dsb-status-ok {
   font-size: 12px;
