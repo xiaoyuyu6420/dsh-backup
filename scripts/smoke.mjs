@@ -438,7 +438,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair']), `12 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair', 'backupPanel/migrateCheck', 'backupPanel/setGithubToken']), `14 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -552,6 +552,29 @@ async function main() {
     ok(await fs.readFile(credsPath, 'utf8').then((t) => t.includes('test-token'), () => false), '镜像清理后凭据文件仍在（keep 集保留）');
     const bareFilesCred = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
     ok(!bareFilesCred.includes('.git-credentials'), 'bare 仓库不含 .git-credentials');
+
+    console.log('10c) GitHub token 面板/聊天直配（本机存储，不进归档不进同步）');
+    {
+      const bad = await panel2.setGithubToken('this is a pasted sentence with spaces');
+      ok(bad.ok === false && bad.summary.includes('形状不对'), '形状非法的 token 被拒');
+      const good = await panel2.setGithubToken(`ghp_${'a'.repeat(36)}`);
+      ok(good.ok === true && good.tokenSet === true, '面板 setGithubToken 保存成功');
+      const tokenFile = `${root}/github.token`;
+      ok(await fs.readFile(tokenFile, 'utf8').then((t) => t.trim() === `ghp_${'a'.repeat(36)}`, () => false), 'token 落盘 github.token');
+      if (!IS_WIN) {
+        const tokMode = (await fs.stat(tokenFile)).mode & 0o777;
+        ok(tokMode === 0o600, `github.token 权限 0600（实际 ${tokMode.toString(8)}）`);
+      }
+      ok((await panel2.githubStatus()).tokenSet === true, 'githubStatus.tokenSet 反映面板 token');
+      const off = await mock3.handler('github token off');
+      ok(off.kind === 'success' && off.text.includes('已清除'), '聊天 github token off 清除');
+      ok(await fs.stat(tokenFile).then(() => false, () => true), 'github.token 文件已删除');
+      ok((await panel2.githubStatus()).tokenSet === false, '清除后 tokenSet=false（无环境变量兜底）');
+      const chat = await mock3.handler('github token github_pat_' + 'B'.repeat(70));
+      ok(chat.kind === 'success' && chat.text.includes('已保存'), '聊天 github token 保存成功');
+      ok((await panel2.githubStatus()).tokenSet === true, '聊天保存后 tokenSet=true');
+      await mock3.handler('github token off');
+    }
 
     console.log('11) 删除备份 + GitHub 地址运行时修改');
     for (let i = 0; i < 2; i += 1) await mock3.handler('--keep 2');
@@ -789,7 +812,7 @@ async function main() {
     console.log('19) RPC 方法名保留字预检（#2 事故防复发，issue #9）');
     const contrib19 = mock.typertContribs[0];
     const methods19 = contrib19 ? contrib19.invocations.map((d) => d.method) : [];
-    ok(methods19.length === 12, `注册了 ${methods19.length} 个 RPC 方法（期望 12）`);
+    ok(methods19.length === 14, `注册了 ${methods19.length} 个 RPC 方法（期望 14）`);
     let reservedHit = null;
     for (const name of methods19) {
       try { assertPanelMethodAvailable('backupPanel', name); } catch { reservedHit = name; }
@@ -1086,7 +1109,14 @@ async function main() {
           await new Promise((rr) => setTimeout(rr, 250));
         }
         ok(preUpgrade.length === 1, `列车变化触发升级前快照（实际 ${preUpgrade.length}）`);
-        ok(JSON.parse(await fs.readFile(autoPath, 'utf8')).lastTrain !== '0.0.1-test-old', 'lastTrain 已更新');
+        // lastTrain 在快照落盘+剪枝之后才原子写回——归档可见的瞬间断言会与
+        // 写盘竞争（实测偶发红），改为轮询等待
+        let trainUpdated = false;
+        for (let i = 0; i < 20 && !trainUpdated; i += 1) {
+          trainUpdated = JSON.parse(await fs.readFile(autoPath, 'utf8')).lastTrain !== '0.0.1-test-old';
+          if (!trainUpdated) await new Promise((rr) => setTimeout(rr, 100));
+        }
+        ok(trainUpdated, 'lastTrain 已更新');
         const l24 = await mock24.handler('list');
         ok(l24.text.includes('内部快照') && l24.text.includes('升级前快照'), 'list 分区展示内部快照');
         ok(!(await listArchives(env24.root)).some((n) => n.startsWith('dsh-pre-upgrade-')), '用户备份列表不含内部快照');
@@ -1282,6 +1312,70 @@ async function main() {
       }
     }
 
+    console.log('27) 迁移预检（migrate-check：v0 拒绝规则 / v2 白名单 / 文件名代际 / 凭据哨兵）');
+    {
+      const gdir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-migrate-'));
+      const ghome = path.join(gdir, 'home');
+      const groot = `${ghome}/Desktop/dsh-backups`;
+      const gdsh = path.join(ghome, '.dsh');
+      await fs.mkdir(path.join(gdsh, 'sessions', '--proj--'), { recursive: true });
+      try {
+        const gmock = makeCtx({ home: ghome, dsh: gdsh });
+        plugin(gmock.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        const sessDir = path.join(gdsh, 'sessions', '--proj--');
+        const zc = typeof zlib.zstdCompressSync === 'function' ? (t) => zlib.zstdCompressSync(t) : () => Buffer.from('placeholder');
+        const hdr = (v, id) => JSON.stringify({ type: 'session', version: v, id, createdAt: 1724544000000, delegationDepth: 0 });
+        const ev = (seq, type, data) => JSON.stringify({ type, seq, time: 1000, ...(data ? { data } : {}) });
+        const writeLog = async (dirName, fileName, lines) => {
+          await fs.mkdir(path.join(sessDir, dirName), { recursive: true });
+          const body = lines.map((l) => `${l}\n`).join('');
+          await fs.writeFile(path.join(sessDir, dirName, fileName), fileName.endsWith('.zstd') ? zc(body) : Buffer.from(body, 'utf8'));
+        };
+        // ① v0 + descriptor version:2（#6297/#6045 主症状）
+        await writeLog('mig-desc2', 'session.jsonl.zstd', [hdr(0, 's-desc2'), ev(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } }), ev(1, 'subagent/descriptor', { version: 2 })]);
+        // ② v0 + permission/preset 混入 origin（#6297 主症状 B）
+        await writeLog('mig-perm', 'session.jsonl', [hdr(0, 's-perm'), ev(0, 'permission/preset', { preset: 'std', origin: 'user' })]);
+        // ③ v2 + 社区插件自定义 source kind（#6355）
+        await writeLog('mig-kind', 'session.v2.jsonl.zstd', [hdr(2, 's-kind'), ev(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'at-file-mention' } })]);
+        // ④ v2 + v3 保留 PTC 标签
+        await writeLog('mig-ptc', 'session.v2.jsonl', [hdr(2, 's-ptc'), ev(0, 'tool/code-dispatch', {})]);
+        // ⑤ 文件名代际与 header 不一致
+        await writeLog('mig-name', 'session.v1.jsonl.zstd', [hdr(0, 's-name'), ev(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } })]);
+        // ⑥⑦ 健康对照：旧代（migratable）与当前代（ok）
+        await writeLog('mig-old', 'session.jsonl', [hdr(0, 's-old'), ev(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } })]);
+        await writeLog('mig-v3', 'session.v3.jsonl', [hdr(3, 's-v3'), ev(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } })]);
+        // ⑧ 凭据扁平布局（哨兵应存底）
+        await fs.writeFile(path.join(gdsh, '.credentials.yaml'), 'DEEPSEEK_KEY: sk-xxx\n');
+        const mc = await gmock.tool().execute({ mode: 'migrate' }, {});
+        // 无 zstd 运行时（Node <22.15/23.8，如 CI 的 20 矩阵）：三个 .zstd 样本
+        // 按设计走 skipped——期望值按运行时能力分支
+        const hasZstd = typeof zlib.zstdCompressSync === 'function';
+        const expFail = hasZstd ? 5 : 2;
+        const expSkip = hasZstd ? 0 : 3;
+        ok(mc.scanned === 7, `迁移预检扫到 7 个会话日志（实际 ${mc.scanned} :: ${String(mc.summary).slice(0, 200)}）`);
+        ok(mc.failCount === expFail && mc.skippedCount === expSkip, `静态拒绝 ${expFail} 个 + skipped ${expSkip} 个（实际 fail=${mc.failCount} skip=${mc.skippedCount}）`);
+        const byDir = Object.fromEntries(mc.sessions.map((s) => [s.path.split('/').slice(-2)[0], s]));
+        if (hasZstd) {
+          ok(byDir['mig-desc2']?.findings.some((f) => f.rule === 'descriptor-version'), 'v0 descriptor version:2 被检出（#6297/#6045）');
+          ok(byDir['mig-kind']?.findings.some((f) => f.rule === 'unknown-source-kind'), 'v2 未知 source.kind 被检出（#6355）');
+          ok(byDir['mig-name']?.findings.some((f) => f.rule === 'name-version-mismatch'), '文件名代际不一致被检出');
+        }
+        ok(byDir['mig-perm']?.findings.some((f) => f.rule === 'permission-preset-members'), 'v0 permission/preset origin 被检出（#6297）');
+        ok(byDir['mig-ptc']?.findings.some((f) => f.rule === 'ptc-reserved-v2'), 'v2 保留 PTC 标签被检出');
+        // 工具面只回 fail 项；健康项由计数判定：
+        // zstd 可用 7 = 5 fail + 1 migratable + 1 ok；不可用 7 = 2 fail + 1 migratable + 1 ok + 3 skipped
+        ok(mc.migratableCount === 1 && mc.scanned === 7, '健康旧代判 migratable、当前代判 ok（计数闭合）');
+        ok(mc.env.hardlink === true, '硬链接探测通过');
+        ok(mc.env.credentialsFlat === true, '扁平凭据布局被识别');
+        const presDir = path.join(groot, 'vault', 'preserved');
+        ok((await fs.readdir(presDir).catch(() => [])).length === 1, '凭据哨兵已存底 vault/preserved');
+        ok(mc.summary.includes('静态规则'), '摘要如实标注静态规则覆盖边界');
+        const chat = await gmock.handler('migrate-check');
+        ok(chat.kind === 'error' && chat.text.includes('打不开'), '聊天 migrate-check 对有问题的库报 error 档');
+      } finally {
+        await fs.rm(gdir, { recursive: true, force: true });
+      }
+    }
     // doctor 行级 SessionHeader 校验对齐宿主 isHeaderLine（0.1.2-rc.1 严格超集）：
     // 八种坏 header 形态各一例 + 一例健康对照，全走多帧 zstd 容器。
     console.log('21) doctor：SessionHeader 形态负样本（对齐宿主 isHeaderLine）');

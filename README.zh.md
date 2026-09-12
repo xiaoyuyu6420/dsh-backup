@@ -132,6 +132,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 <details>
 <summary>最近的版本</summary>
 
+- **0.12.0** —— 迁移安全网第一弹，对准官方社区集中爆发的「升级后老会话打不开」（#6151/#6297/#6355）：① `/backup migrate-check` 迁移预检——升级前静态扫描全部代会话日志（v0/v1/v2/v3），预测哪些会话升完会打不开、挂在哪条规则（descriptor v2、permission/preset origin、冻结清单外事件类型、自定义来源 kind、seq 漂移、文件名代际不一致……规则烤入自宿主 0.1.5-rc.2，摘要如实标注覆盖边界），并探测文件系统硬链接支持（exFAT 上宿主发布会失败的 #6358 场景）；② 凭据哨兵——旧扁平布局的 `.credentials.yaml` 会被宿主原子替换成 version:1（不可逆），检测到即先自动存底 vault 再让宿主动它。③ GitHub token 面板直配——设置面板（或 `/backup github token <token>`）直接粘贴保存，存本机备份目录 `github.token`（0600，不进归档、不进 GitHub 同步），优先于环境变量，跨机恢复后重填。另：新增 `engines.dsh` 声明（插件市场的兼容卡片读取它）。
 - **0.11.3** —— 跟进 dsh `0.1.5` 列车：peerDependencies 追加 `^0.1.5-rc.1`（0.11.2 在 0.1.5 宿主上会报 peer 警告）。兼容实测：宿主 `0.1.5-rc.2` 真机 e2e 32/32；六个 node 侧 peer 包 rc.1↔rc.2 **逐字节相同**（tarball diff），client 包列车未动——本次升列车零适配面；跨列车原地升级 e2e（rc.1 宿主 + 0.11.2 → rc.2 宿主 + 0.11.3）14/14，设置与归档无损。顺带修了升级 e2e 脚本自身的一个坑：新版期望版本从写死改为从 tarball 动态推导，换版本对不再改脚本。
 - **0.11.2** —— doctor 行级 SessionHeader 校验对齐宿主 `isHeaderLine`（闭环 0.11.0 已知遗留）：补 `version`/`createdAt`/`delegationDepth` 类型与非负安全整数三连（含 `-0` 拒绝）、`seedLength`/`origin`/`agentPreset` 可选分支、退役字段 `sandboxMode`/`approvalPolicy`——宿主拒载的 header 不再被误报健康。对照双列车宿主编译产物逐字段验证（rc.1 为严格超集），独立复核结论 ALIGN；测试套新增 11 种坏 header 负样本 + 修复往返。
 - **0.11.1** —— 适配 dsh `0.1.2-rc.1`：跟随 `@deepseek-ai/dsh-settings` 移除 `settingsNamespace`（改用普通 `dsh-backup` 命名空间注册——取值完全一致，原地更新后设置、备份与旧归档全部无损），支持 Web 强制鉴权（303 + HttpOnly cookie），peer 范围放宽为 `^0.1.1-rc.2 || ^0.1.2-rc.1`。双列车真宿主 e2e 各 32/32 通过，另做了 0.11.0 → 0.11.1 原地升级测试（设置保留、旧归档可恢复）。
