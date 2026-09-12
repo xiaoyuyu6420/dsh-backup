@@ -39,6 +39,7 @@ export function BackupTab({ panel, t }) {
   const [hoursInput, setHoursInput] = useState('');
   const [pending, setPending] = useState(null);
   const [repoInput, setRepoInput] = useState('');
+  const [tokenInput, setTokenInput] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
   // 分类型备份：本次勾选的类型（空集 = 全量备份）
   const [typeSel, setTypeSel] = useState(() => new Set());
@@ -128,6 +129,10 @@ export function BackupTab({ panel, t }) {
   const saveRepo = (value) => {
     setConfirmDelete(null);
     void run('github-repo', () => panel.setGithubRepo(value)).then(reload);
+  };
+  const saveToken = (value) => {
+    setConfirmDelete(null);
+    void run('github-token', () => panel.setGithubToken(value)).then(() => { setTokenInput(''); return reload(); });
   };
   const deleteOne = (name) => {
     setConfirmDelete(null);
@@ -494,6 +499,32 @@ export function BackupTab({ panel, t }) {
                 <button type="button" className="dsb-btn-secondary" disabled={busy !== ''} onClick={pullNow}>
                   {busy === 'github-pull' ? t('githubPullBusy') : t('githubPull')}
                 </button>
+              </div>
+              <div className="dsb-row">
+                <label>
+                  {t('githubTokenLabel')}
+                  <input
+                    type="password" autoComplete="off" placeholder={t('githubTokenPlaceholder')}
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    style={{ width: '18em' }}
+                  />
+                </label>
+                <button
+                  type="button" className="dsb-btn-secondary"
+                  disabled={busy !== '' || tokenInput.trim() === ''}
+                  onClick={() => saveToken(tokenInput.trim())}
+                >
+                  {t('save')}
+                </button>
+                <button
+                  type="button" className="dsb-btn-secondary"
+                  disabled={busy !== ''}
+                  onClick={() => saveToken('off')}
+                >
+                  {t('clear')}
+                </button>
+                <span className="dsb-item-meta">{t('githubTokenNote')}</span>
               </div>
             </div>
           ) : null}

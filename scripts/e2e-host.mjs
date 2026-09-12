@@ -335,6 +335,53 @@ async function main() {
     const rescan = await rpc('doctorScan');
     check('修复后复扫全绿', rescan?.ok === true && rescan?.corruptCount === 0, JSON.stringify(rescan).slice(0, 160));
 
+    // ---------- 迁移预检：真宿主环境下的静态规则与环境探测 ----------
+    // 两个坏样本（#6297/#6045 descriptor v2 + #6355 自定义 source kind）+ 一个
+    // 健康 v3 对照；raw JSONL 与 zstd 同样对待，写 raw 即可。
+    const migHdr = (v, id) => JSON.stringify({ type: 'session', version: v, id, createdAt: 1724544000000, delegationDepth: 0 });
+    const migEv = (seq, type, data) => JSON.stringify({ type, seq, time: 1000, ...(data ? { data } : {}) });
+    fs.mkdirSync(path.join(sessRoot, 'mig-desc2'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessRoot, 'mig-desc2', 'session.jsonl'),
+      [migHdr(0, 's-desc2'), migEv(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } }), migEv(1, 'subagent/descriptor', { version: 2 })].join('\n') + '\n',
+    );
+    fs.mkdirSync(path.join(sessRoot, 'mig-kind'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessRoot, 'mig-kind', 'session.v2.jsonl'),
+      [migHdr(2, 's-kind'), migEv(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'at-file-mention' } })].join('\n') + '\n',
+    );
+    fs.mkdirSync(path.join(sessRoot, 'mig-ok'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessRoot, 'mig-ok', 'session.v3.jsonl'),
+      [migHdr(3, 's-ok'), migEv(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } })].join('\n') + '\n',
+    );
+    const mig = await rpc('migrateCheck');
+    check(
+      'RPC migrateCheck 检出 v0 descriptor v2 与 v2 自定义 kind',
+      mig?.failCount === 2
+        && mig.sessions?.some((s) => s.rel.includes('mig-desc2') && s.findings?.some((f) => f.rule === 'descriptor-version'))
+        && mig.sessions?.some((s) => s.rel.includes('mig-kind') && s.findings?.some((f) => f.rule === 'unknown-source-kind')),
+      JSON.stringify(mig).slice(0, 300),
+    );
+    check(
+      'RPC migrateCheck 环境探测：硬链接支持 + 摘要标注覆盖边界',
+      mig?.env?.hardlink === true && String(mig?.summary).includes('静态规则'),
+      JSON.stringify(mig?.env).slice(0, 160),
+    );
+
+    // ---------- GitHub token 面板直配：RPC 往返 ----------
+    const tokSet = await rpc('setGithubToken', { token: `ghp_${'e2e'.repeat(18)}` });
+    check('RPC setGithubToken 保存成功', tokSet?.ok === true && tokSet?.tokenSet === true, JSON.stringify(tokSet).slice(0, 160));
+    const ghAfterSet = await rpc('githubStatus');
+    check('保存后 githubStatus.tokenSet=true', ghAfterSet?.tokenSet === true, JSON.stringify(ghAfterSet).slice(0, 160));
+    const tokClear = await rpc('setGithubToken', { token: 'off' });
+    const ghAfterClear = await rpc('githubStatus');
+    check(
+      'RPC setGithubToken(off) 清除后 tokenSet=false',
+      tokClear?.ok === true && ghAfterClear?.tokenSet === false,
+      JSON.stringify({ tokClear, tokenSet: ghAfterClear?.tokenSet }).slice(0, 160),
+    );
+
     // 老归档兼容：删 meta/redacted 边车（v0.6.x 形态）→ dry-run 静默降级仍可预览
     const bkdest = path.join(home, 'bkdest');
     const legacyName = fs.readdirSync(bkdest).filter((f) => /^dsh-\d.*\.tar\.gz$/.test(f)).sort().pop();
