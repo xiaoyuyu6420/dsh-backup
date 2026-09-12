@@ -46,7 +46,7 @@ Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins �
 
 ## Install
 
-Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2` or compatible.
+Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 trains are all tested; verified up to `0.1.5-rc.2`).
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
@@ -132,6 +132,7 @@ Tried it? Tell us what broke, what's missing, what you liked — it directly sha
 <details>
 <summary>Recent releases</summary>
 
+- **0.11.3** — Follow the dsh `0.1.5` train: peerDependencies now include `^0.1.5-rc.1` (0.11.2 raised peer warnings on 0.1.5 hosts). Verified against host `0.1.5-rc.2`: real-host e2e 32/32; all six node-side peer packages are **byte-identical** between rc.1 and rc.2 (tarball diff) and the client train hasn't moved — zero adaptation surface this time; a cross-train in-place upgrade e2e (rc.1 host + 0.11.2 → rc.2 host + 0.11.3) passed 14/14 with settings and archives intact. Also fixed a latent bug in the upgrade e2e itself: the expected new version is now derived from the tarball instead of hardcoded.
 - **0.11.2** — doctor line-level SessionHeader validation aligned with the host `isHeaderLine` (closes the known gap from 0.11.0): `version`/`createdAt`/`delegationDepth` type + non-negative-safe-integer checks (including `-0` rejection), optional `seedLength`/`origin`/`agentPreset` branches, and retired `sandboxMode`/`approvalPolicy` fields the host reader rejects — headers the host refuses to load are now flagged instead of reported healthy. Verified field-by-field against the compiled host source (both trains; the rc.1 checker is the strict superset) with an independent review verdict of ALIGN; 11 bad-header negative samples + repair round-trip added to the suite.
 - **0.11.1** — dsh `0.1.2-rc.1` compatibility: adapts to the removal of `settingsNamespace` from `@deepseek-ai/dsh-settings` (settings now register under the plain `dsh-backup` namespace — value-identical, so existing settings, backups and archives survive an in-place update), works behind the new forced web auth (303 + HttpOnly cookie), and widens peer ranges to `^0.1.1-rc.2 || ^0.1.2-rc.1`. Verified on both trains with real-host e2e (32/32 each) plus an in-place 0.11.0 → 0.11.1 upgrade test (settings preserved, old archives restorable).
 - **0.11.0** — doctor container-contract check: the first zstd frame must decode to exactly one header line, byte-precise (non-empty, first newline at the last byte — aligned with the host reader). Single-frame rewrites, stray blank lines in the first frame, a missing trailing newline and skippable frames are now flagged corrupt (previously reported healthy while the host refused to load them); the rescue console checks in sync. Found via a community audit on deepseek-harness #1047.
