@@ -46,7 +46,7 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 
 ## 安装
 
-要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2` 或兼容版本。
+要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 列车均已实测，最新验证至 `0.1.5-rc.2`）。
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
@@ -132,6 +132,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 <details>
 <summary>最近的版本</summary>
 
+- **0.11.3** —— 跟进 dsh `0.1.5` 列车：peerDependencies 追加 `^0.1.5-rc.1`（0.11.2 在 0.1.5 宿主上会报 peer 警告）。兼容实测：宿主 `0.1.5-rc.2` 真机 e2e 32/32；六个 node 侧 peer 包 rc.1↔rc.2 **逐字节相同**（tarball diff），client 包列车未动——本次升列车零适配面；跨列车原地升级 e2e（rc.1 宿主 + 0.11.2 → rc.2 宿主 + 0.11.3）14/14，设置与归档无损。顺带修了升级 e2e 脚本自身的一个坑：新版期望版本从写死改为从 tarball 动态推导，换版本对不再改脚本。
 - **0.11.2** —— doctor 行级 SessionHeader 校验对齐宿主 `isHeaderLine`（闭环 0.11.0 已知遗留）：补 `version`/`createdAt`/`delegationDepth` 类型与非负安全整数三连（含 `-0` 拒绝）、`seedLength`/`origin`/`agentPreset` 可选分支、退役字段 `sandboxMode`/`approvalPolicy`——宿主拒载的 header 不再被误报健康。对照双列车宿主编译产物逐字段验证（rc.1 为严格超集），独立复核结论 ALIGN；测试套新增 11 种坏 header 负样本 + 修复往返。
 - **0.11.1** —— 适配 dsh `0.1.2-rc.1`：跟随 `@deepseek-ai/dsh-settings` 移除 `settingsNamespace`（改用普通 `dsh-backup` 命名空间注册——取值完全一致，原地更新后设置、备份与旧归档全部无损），支持 Web 强制鉴权（303 + HttpOnly cookie），peer 范围放宽为 `^0.1.1-rc.2 || ^0.1.2-rc.1`。双列车真宿主 e2e 各 32/32 通过，另做了 0.11.0 → 0.11.1 原地升级测试（设置保留、旧归档可恢复）。
 - **0.11.0** —— doctor 容器契约校验：首帧必须解出「恰好一行 header、单个换行结尾」（字节精确，对齐宿主读端）。单帧重写、首帧多余空行、缺行尾、skippable 帧现在都会判损坏（此前报健康但宿主拒载）；救援台同步。来自 deepseek-harness 官方讨论区 #1047 的社区审计。
