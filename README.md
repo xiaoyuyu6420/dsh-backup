@@ -7,17 +7,17 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Listed on DSH Directory](https://dsh.directory/badges/listed.svg)](https://dsh.directory/plugins/xiaoyuyu6420/dsh-backup)
 
-English | [简体中文](README.zh.md)
+[English](README.en.md) | 简体中文
 
-**Your entire DeepSeek Harness (DSH) workspace lives in one folder: `~/.dsh`. One failed upgrade, one accidental delete, one new laptop — without a backup, sessions, settings and skills are all gone. dsh-backup gives them back with one command.**
+**你所有的 DeepSeek Harness（DSH）工作数据都在一个目录里：`~/.dsh`。一次升级失败、一次误删、一次换电脑——没有备份，会话、设置、技能全没了。dsh-backup 用一条命令把它们找回来。**
 
 ```sh
-dsh plugin --profile web add @xiaoyuyu6420/dsh-backup   # install
-# restart dsh web, then type:
-/backup                                                  # → a verified archive lands in ~/Desktop/dsh-backups/
+dsh plugin --profile web add @xiaoyuyu6420/dsh-backup   # 安装
+# 重启 dsh web，然后输入：
+/backup                                                  # → 一份带校验的备份落在 ~/Desktop/dsh-backups/
 ```
 
-Real output from a fresh v0.9.0 install:
+v0.9.0 全新安装的真实输出：
 
 ```text
 备份完成: dsh-20260826-195150036.tar.gz
@@ -25,136 +25,141 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 轮换删除 0 份（保留 7 份）
 ```
 
-Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins → Backup: list, verify, restore, delete, edit settings — no restart.
+不想敲命令也行：`dsh web` → 设置 → 插件 → 备份 里有可视化面板——列备份、校验、恢复、删除、改设置，全都立即生效不用重启。
 
-![Backup panel](docs/assets/panel-backups.png)
+![备份面板](docs/assets/panel-backups.png)
 
-## Why you want this
+## 它替你挡掉哪些事
 
-| Fear | What dsh-backup does about it |
+| 你担心的 | dsh-backup 做的事 |
 |---|---|
-| "An upgrade broke my setup" | Auto-takes a `dsh-pre-upgrade-` snapshot the moment the host version changes — try the new release, roll back if it bites |
-| "I deleted / broke something" | `/backup restore latest --dry-run` previews exactly what comes back; a failed restore auto-rolls-back and shows a result receipt |
-| "DSH won't even boot anymore" | Every backup drops a zero-dependency **rescue console** (`dsh-rescue` / `rescue.mjs`, or double-click「点我恢复」) next to the archives — a web UI that restores outside of DSH |
-| "My API keys will end up in a cloud backup" | Credentials are redacted from archives by default; plaintext only ever lives in a local vault on your machine |
-| "My session logs got corrupted" | `/backup doctor` scans and repairs session logs from a known-good backup; corrupt files are quarantined before they rotate away |
-| "I got a new machine" | GitHub sync: `/backup github pull` fetches remote archives, `restore --sync-deps` reinstalls plugins |
-| "Backups rot silently" | Every archive ships a sha256; `/backup verify all` checks integrity; daily/weekly tiered retention keeps useful history longer |
-| "I'll forget to back up" | `/backup auto 12` — every 12 hours, survives restarts, rotates old copies (default keep 7) |
+| 「升级把环境搞坏了」 | 宿主版本一变就自动拍 `dsh-pre-upgrade-` 快照——放心试新版，坏了随时回滚 |
+| 「我误删 / 改坏了东西」 | `/backup restore latest --dry-run` 先预览要恢复什么再动手；恢复失败自动回滚并给出结果回执 |
+| 「DSH 根本起不来了」 | 每次备份都会往备份目录放一个零依赖的**救援控制台**（`dsh-rescue` / `rescue.mjs`，或双击「点我恢复」）——不依赖 DSH 的网页版恢复界面 |
+| 「API Key 会被传到云上吗」 | 凭据默认脱敏，不进备份包；明文只存本机 vault，永不离开这台机器 |
+| 「会话日志损坏了」 | `/backup doctor` 体检并从备份定点修复；损坏文件先隔离再入档，防止轮换把好副本也带走 |
+| 「升级后老会话打不开了」 | `/backup migrate-check` 迁移预检：升级前静态扫描全部会话，预测哪些会被新宿主拒绝、挂在哪条规则；旧版扁平凭据文件在宿主改写前自动存底 |
+| 「换新电脑了」 | GitHub 同步：`/backup github pull` 拉回云端备份，`restore --sync-deps` 顺手重装插件 |
+| 「备份悄悄坏了没人知道」 | 每份归档带 sha256，`/backup verify all` 随时体检；每日/每周分级保留，留得住有用的历史 |
+| 「我会忘记备份」 | `/backup auto 12`——每 12 小时自动跑，重启不中断，旧副本自动轮换（默认保留 7 份） |
 
-![Backup settings](docs/assets/panel-settings.png)
+![备份设置](docs/assets/panel-settings.png)
 
-## Install
+## 安装
 
-Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 trains are all tested; verified up to `0.1.5-rc.2`).
+要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 列车均已实测，最新验证至 `0.1.5-rc.2`）。
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
-# or straight from GitHub:
+# 或者直接从 GitHub 安装：
 dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 ```
 
-Restart `dsh web` afterwards — the plugin only takes effect after a restart.
+装完重启 `dsh web` 后插件才生效。
 
-> The installer may print `✕ missing peer @deepseek-ai/...` warnings. These are
-> expected: the peer packages are provided by the DSH host at runtime. As long
-> as the command ends with `Done`, the plugin is installed.
+> 安装时可能刷出 `✕ missing peer @deepseek-ai/...` 警告，属预期现象：这些
+> peer 包由 DSH 宿主在运行时提供，不装在 profile 目录里。只要命令以
+> `Done` 结尾就是装成功了。
 
-## Quickstart
+## 快速上手
 
-1. Install (above) and restart `dsh web`
-2. Type `/backup`
-3. Done — the archive lands in `~/Desktop/dsh-backups/`, timestamped, with a `.sha256` next to it
+1. 按上面装好插件，重启 `dsh web`
+2. 输入 `/backup`
+3. 搞定 —— 备份出现在 `~/Desktop/dsh-backups/`，文件名带时间戳，旁边一份 `.sha256`
 
-Want it on a schedule? `/backup auto 12` (every 12 hours; `off` stops it, `status` checks it).
+想定时自动跑？`/backup auto 12`（每 12 小时一次；`off` 关闭，`status` 看状态）。
 
-## Command cheat sheet
+## 命令速查
 
-| Task | Command |
+| 场景 | 命令 |
 |---|---|
-| Back up now | `/backup` |
-| Typed backup (selected types only) | `/backup --types skills,sessions` (types: `credentials`·`mcp`·`skills`·`sessions`·`settings`·`profiles`; `--only` works too) |
-| Schedule (survives restarts) | `/backup auto 12` · `off` · `status` |
-| Restore (preview first) | `/backup restore latest --dry-run` |
-| Restore for real | `/backup restore latest` |
-| Typed restore (merge, other types untouched) | `/backup restore <archive> --types skills` |
-| List backups | `/backup list` |
-| Verify integrity | `/backup verify [prefix\|all]` |
-| Check & repair session logs | `/backup doctor` · `--repair [prefix\|latest]` |
-| **Rescue when DSH won't boot** | double-click「点我恢复」in the backup dir, or `dsh-rescue` / `node rescue.mjs` |
-| Delete / retention | `/backup delete <prefix\|latest>` · `/backup --keep N` (default 7) |
+| 立即备份 | `/backup` |
+| 分类型备份（只备份选中类型） | `/backup --types skills,sessions`（可选：`credentials`·`mcp`·`skills`·`sessions`·`settings`·`profiles`；`--only` 同义） |
+| 定时备份（重启不中断） | `/backup auto 12` · `off` · `status` |
+| 恢复（先预览） | `/backup restore latest --dry-run` |
+| 正式恢复 | `/backup restore latest` |
+| 分类型恢复（merge，不动其他类型） | `/backup restore <归档> --types skills` |
+| 列出备份 | `/backup list` |
+| 校验完整性 | `/backup verify [前缀\|all]` |
+| 会话日志体检/修复 | `/backup doctor` · `--repair [前缀\|latest]` |
+| **升级前迁移预检** | `/backup migrate-check` |
+| **DSH 起不来时自救** | 双击备份目录里的「点我恢复」，或 `dsh-rescue` / `node rescue.mjs` |
+| 删除 / 保留策略 | `/backup delete <前缀\|latest>` · `/backup --keep N`（默认 7） |
 
-## Typed backup
+## 分类型备份
 
-Only need certain kinds of data? Use `--types` (or `--only`) to operate on a subset. Available types: `credentials` (API keys), `mcp` (MCP config), `skills`, `sessions`, `settings`, `profiles`.
+只想备份/恢复某几类数据？`--types`（或 `--only`）按内容类型子集操作，可选类型：`credentials`（凭据/api key）、`mcp`（MCP 配置）、`skills`（技能）、`sessions`（会话）、`settings`（设置）、`profiles`（插件 profiles）。
 
-- **Back up**: `/backup --types skills,sessions` creates a `dsh-t-` subset archive; rotation is tracked separately from full backups
-- **Restore**: `/backup restore <archive> --types skills` merges only skills back into your existing `~/.dsh` (preview with `--dry-run`; overwritten files are kept aside as `.pre-merge-*`). Everything else stays untouched.
-- **Credentials caveat**: `--types credentials` puts API keys into the archive **in plaintext** (full backups redact them). Such archives never go to GitHub sync — keep them local or copy them to a new machine yourself.
-- **Guardrail**: restoring a typed archive without `--types` is rejected (prevents accidental data loss); the rescue channel likewise won't list or fully restore them.
-- The Settings panel supports this too: check types under the backup button; typed archives get their own section.
+- **备份**：`/backup --types skills,sessions` 生成 `dsh-t-` 前缀的子集归档，与全量备份分开轮换、互不挤占保留份数
+- **恢复**：`/backup restore <归档名> --types skills` 只把 skills 合并回现有 `~/.dsh`（先 `--dry-run` 预览；覆盖的现有文件自动留档 `.pre-merge-*`），其他类型完全不碰
+- **凭据类型特殊**：`--types credentials` 会把 api key **明文**打进归档（默认全量备份是脱敏的）——这类归档绝不进 GitHub 同步，仅建议本机保存或手动拷到新机
+- **安全护栏**：分类型归档不带 `--types` 直接整包恢复会被拒绝（防止误覆盖丢数据）；rescue 救援通道同样不列、不整包恢复它们
+- 面板（Settings → 插件 → 备份）同样支持：备份按钮下方勾选类型；分类型归档在独立分区展示与恢复
 
-## New machine
+## 换新电脑
 
-Prerequisite: GitHub sync was configured on the old one ([setup](docs/advanced.zh.md#github-同步可选), Chinese).
+前提：旧电脑配过 GitHub 同步（[配置方法](docs/advanced.zh.md#github-同步可选)）。
 
-1. Install the plugin, set the same `githubRepo`
-2. `/backup github pull` — fetch the remote backups
-3. `/backup restore latest --sync-deps` — restore and reinstall plugin dependencies
-4. Restart `dsh`
+1. 新电脑装好插件，配置里填同一个 `githubRepo`
+2. `/backup github pull` —— 拉回云端备份
+3. `/backup restore latest --sync-deps` —— 恢复并重装插件依赖
+4. 重启 `dsh`
 
-## FAQ
+## 常见问题
 
-**Are my API keys / credentials inside the archive?**
-No. Known credential files are redacted before archiving; the plaintext stays in a local vault that never leaves the machine. Restoring puts them back.
+**API Key / 密码会进备份包吗？**
+不会。已知的凭据文件打包前会脱敏，明文留在本机 vault 里不离开这台机器；恢复时自动还原。
 
-**What exactly gets backed up?**
-Everything under `~/.dsh` — sessions, settings, skills, plugin config — minus your exclude patterns and `node_modules`.
+**到底备份了什么？**
+`~/.dsh` 下的全部——会话、设置、技能、插件配置——减去你配置的排除模式和 `node_modules`。
 
-**I messed up `~/.dsh` and now `dsh` won't start. Am I out of options?**
-No — that's exactly what the rescue channel is for. Every backup writes `rescue.mjs` and a double-clickable launcher (`点我恢复.command` / `.bat` / `.sh`) into the backup directory. It runs on plain Node, no DSH required, and serves a local web UI to browse and restore archives.
+**我把 `~/.dsh` 搞坏了，`dsh` 都启动不了，还有救吗？**
+有——这正是救援通道的用途。每次备份都会往备份目录写 `rescue.mjs` 和双击启动器（macOS `.command` / Windows `.bat` / Linux `.sh`）。它只用普通 Node 就能跑，不需要 DSH，起一个本地网页让你浏览和恢复备份。
 
-**Windows support?**
-Yes — Windows 10+ with the bundled `tar`. The rescue launcher becomes a `.bat` file.
+**升级后老会话打不开了怎么办？**
+先别再点开它。运行 `/backup migrate-check`：静态扫描全部会话日志，告诉你哪些会话会被新宿主拒绝、挂在哪条规则（subagent descriptor 旧版本、插件注入的历史事件等），并检查文件系统硬链接支持。升级前先 `/backup` 拍一份，坏掉的会话可用 `/backup doctor --repair` 从更早的归档定点修复。
 
-**Where do backups go by default?**
-`~/Desktop/dsh-backups/` — change it any time in the panel (Settings → Plugins → Backup) or via settings; takes effect immediately, no restart.
+**支持 Windows 吗？**
+支持——Windows 10+（用系统自带 `tar`），救援启动器是 `.bat` 文件。
 
-## Feedback
+**备份默认放哪？**
+`~/Desktop/dsh-backups/`——在面板（设置 → 插件 → 备份）里随时可改，立即生效不用重启。
 
-Tried it? Tell us what broke, what's missing, what you liked — it directly shapes the roadmap:
+## 反馈
 
-- 💬 [Share feedback (GitHub Discussions)](https://github.com/xiaoyuyu6420/dsh-backup/discussions)
-- 🐛 [Report a bug](https://github.com/xiaoyuyu6420/dsh-backup/issues)
+用过吗？哪里坏了、缺什么、喜欢什么，都欢迎说——反馈直接决定路线图：
 
-## What's new
+- 💬 [分享反馈（GitHub Discussions）](https://github.com/xiaoyuyu6420/dsh-backup/discussions)
+- 🐛 [报告问题](https://github.com/xiaoyuyu6420/dsh-backup/issues)
+
+## 更新日志
 
 <details>
-<summary>Recent releases</summary>
+<summary>最近的版本</summary>
 
-- **0.12.0** — Migration safety net, round one, aimed at the community-wide "old sessions won't open after upgrade" wave (#6151/#6297/#6355): 1) `/backup migrate-check` statically scans all session logs (v0/v1/v2/v3) before you upgrade and predicts which sessions will refuse to open and under which rule (descriptor v2, permission/preset origin, event types outside the frozen lists, custom source kinds, seq drift, filename/generation mismatch — rules baked from host 0.1.5-rc.2, with the coverage boundary stated in every report), plus a filesystem hardlink probe (the exFAT publish-failure scenario from #6358); 2) a credential sentinel — the legacy flat-layout `.credentials.yaml` gets atomically replaced by the host with an irreversible versioned form, so on detection it is preserved into the vault before the host touches it. 3) configure the GitHub sync token right in the Settings panel (or `/backup github token <token>`) — stored locally as `github.token` (0600) in the backup directory, never archived or synced, taking precedence over environment variables; re-enter after cross-machine restore. Also: `engines.dsh` declaration (read by plugin-market compatibility cards).
-- **0.11.3** — Follow the dsh `0.1.5` train: peerDependencies now include `^0.1.5-rc.1` (0.11.2 raised peer warnings on 0.1.5 hosts). Verified against host `0.1.5-rc.2`: real-host e2e 32/32; all six node-side peer packages are **byte-identical** between rc.1 and rc.2 (tarball diff) and the client train hasn't moved — zero adaptation surface this time; a cross-train in-place upgrade e2e (rc.1 host + 0.11.2 → rc.2 host + 0.11.3) passed 14/14 with settings and archives intact. Also fixed a latent bug in the upgrade e2e itself: the expected new version is now derived from the tarball instead of hardcoded.
-- **0.11.2** — doctor line-level SessionHeader validation aligned with the host `isHeaderLine` (closes the known gap from 0.11.0): `version`/`createdAt`/`delegationDepth` type + non-negative-safe-integer checks (including `-0` rejection), optional `seedLength`/`origin`/`agentPreset` branches, and retired `sandboxMode`/`approvalPolicy` fields the host reader rejects — headers the host refuses to load are now flagged instead of reported healthy. Verified field-by-field against the compiled host source (both trains; the rc.1 checker is the strict superset) with an independent review verdict of ALIGN; 11 bad-header negative samples + repair round-trip added to the suite.
-- **0.11.1** — dsh `0.1.2-rc.1` compatibility: adapts to the removal of `settingsNamespace` from `@deepseek-ai/dsh-settings` (settings now register under the plain `dsh-backup` namespace — value-identical, so existing settings, backups and archives survive an in-place update), works behind the new forced web auth (303 + HttpOnly cookie), and widens peer ranges to `^0.1.1-rc.2 || ^0.1.2-rc.1`. Verified on both trains with real-host e2e (32/32 each) plus an in-place 0.11.0 → 0.11.1 upgrade test (settings preserved, old archives restorable).
-- **0.11.0** — doctor container-contract check: the first zstd frame must decode to exactly one header line, byte-precise (non-empty, first newline at the last byte — aligned with the host reader). Single-frame rewrites, stray blank lines in the first frame, a missing trailing newline and skippable frames are now flagged corrupt (previously reported healthy while the host refused to load them); the rescue console checks in sync. Found via a community audit on deepseek-harness #1047.
-- **0.10.0** — typed backups: back up just what you need (`/backup --types skills,sessions`) and merge-restore a subset (`/backup restore <archive> --types skills`); per-type archives rotate in their own bucket. Credential-type archives stay out of GitHub sync; cross-machine guardrails unchanged.
-- **0.9.1** — feedback entry point in the panel; README overhaul. UX hardening from a six-agent review: restore-confirm button made visible again (missing theme fallback), snapshot self-deletion during snapshot-restore fixed, node discovery for the double-click rescue launcher, friendlier error messages with concrete next steps.
-- **0.9.0** — `/backup doctor` session-log health check with targeted repair; out-of-process rescue channel (`dsh-rescue` / launcher in the backup dir) that works even when the host won't boot; restore auto-rollback with a result-oriented receipt; smart backup: pre-upgrade snapshots on host train changes, quarantine of corrupt session logs before they rotate away, tiered daily/weekly retention.
-- **0.8.0** — edit backup settings right in the panel (destination, retention, exclude patterns), saved instantly to `settings.yaml`, no restart; stale edits get a conflict warning instead of silent overwrite.
-- **0.7.x** — credential redaction with a local vault; cross-machine restore.
+- **0.12.0** —— 迁移安全网第一弹，对准官方社区集中爆发的「升级后老会话打不开」（#6151/#6297/#6355）：① `/backup migrate-check` 迁移预检——升级前静态扫描全部代会话日志（v0/v1/v2/v3），预测哪些会话升完会打不开、挂在哪条规则（descriptor v2、permission/preset origin、冻结清单外事件类型、自定义来源 kind、seq 漂移、文件名代际不一致……规则烤入自宿主 0.1.5-rc.2，摘要如实标注覆盖边界），并探测文件系统硬链接支持（exFAT 上宿主发布会失败的 #6358 场景）；② 凭据哨兵——旧扁平布局的 `.credentials.yaml` 会被宿主原子替换成 version:1（不可逆），检测到即先自动存底 vault 再让宿主动它。③ GitHub token 面板直配——设置面板（或 `/backup github token <token>`）直接粘贴保存，存本机备份目录 `github.token`（0600，不进归档、不进 GitHub 同步），优先于环境变量，跨机恢复后重填。另：新增 `engines.dsh` 声明（插件市场的兼容卡片读取它）。
+- **0.11.3** —— 跟进 dsh `0.1.5` 列车：peerDependencies 追加 `^0.1.5-rc.1`（0.11.2 在 0.1.5 宿主上会报 peer 警告）。兼容实测：宿主 `0.1.5-rc.2` 真机 e2e 32/32；六个 node 侧 peer 包 rc.1↔rc.2 **逐字节相同**（tarball diff），client 包列车未动——本次升列车零适配面；跨列车原地升级 e2e（rc.1 宿主 + 0.11.2 → rc.2 宿主 + 0.11.3）14/14，设置与归档无损。顺带修了升级 e2e 脚本自身的一个坑：新版期望版本从写死改为从 tarball 动态推导，换版本对不再改脚本。
+- **0.11.2** —— doctor 行级 SessionHeader 校验对齐宿主 `isHeaderLine`（闭环 0.11.0 已知遗留）：补 `version`/`createdAt`/`delegationDepth` 类型与非负安全整数三连（含 `-0` 拒绝）、`seedLength`/`origin`/`agentPreset` 可选分支、退役字段 `sandboxMode`/`approvalPolicy`——宿主拒载的 header 不再被误报健康。对照双列车宿主编译产物逐字段验证（rc.1 为严格超集），独立复核结论 ALIGN；测试套新增 11 种坏 header 负样本 + 修复往返。
+- **0.11.1** —— 适配 dsh `0.1.2-rc.1`：跟随 `@deepseek-ai/dsh-settings` 移除 `settingsNamespace`（改用普通 `dsh-backup` 命名空间注册——取值完全一致，原地更新后设置、备份与旧归档全部无损），支持 Web 强制鉴权（303 + HttpOnly cookie），peer 范围放宽为 `^0.1.1-rc.2 || ^0.1.2-rc.1`。双列车真宿主 e2e 各 32/32 通过，另做了 0.11.0 → 0.11.1 原地升级测试（设置保留、旧归档可恢复）。
+- **0.11.0** —— doctor 容器契约校验：首帧必须解出「恰好一行 header、单个换行结尾」（字节精确，对齐宿主读端）。单帧重写、首帧多余空行、缺行尾、skippable 帧现在都会判损坏（此前报健康但宿主拒载）；救援台同步。来自 deepseek-harness 官方讨论区 #1047 的社区审计。
+- **0.10.0** —— 分类型备份：只备份需要的部分（`/backup --types skills,sessions`），按类型 merge 恢复（`/backup restore <归档> --types skills`）；类型归档独立轮换不挤全量配额。含凭据的类型归档永不进 GitHub 同步，跨机护栏不变。
+- **0.9.1** —— 面板新增反馈入口；README 重做。六路 agent UX 深审后的加固：恢复确认按钮补主题色兜底重新可见、修复恢复快照时自毁目标快照的 bug、双击救援启动器自动探测 node、报错文案全面改为"人话 + 下一步"。
+- **0.9.0** —— `/backup doctor` 会话日志体检与定点修复；宿主起不来也能用的进程外救援通道（备份目录里的 dsh-rescue / 双击启动器）；恢复失败自动回滚与结果导向回执；智能备份：宿主升级前自动快照、损坏会话先隔离再入档、每日/每周分级保留。
+- **0.8.0** —— 面板里直接改备份设置（目录、保留份数、排除模式），立即生效写入 settings.yaml 不用重启；两处同时改有冲突提示，不会静默覆盖。
+- **0.7.x** —— 凭据脱敏（本机 vault）、跨机恢复。
 
 </details>
 
-## More
+## 更多
 
-Retention policy, credential redaction internals, GitHub sync, restore safeguards, config reference, troubleshooting, and development notes — in the [advanced guide](docs/advanced.zh.md) (Chinese). Cross-runtime compatibility notes: [compatibility.md](docs/compatibility.md).
+定时备份策略、敏感文件脱敏、GitHub 同步、恢复保护机制、配置参考、故障排查、开发说明——都在[进阶文档](docs/advanced.zh.md)。跨运行时兼容性说明：[compatibility.md](docs/compatibility.md)。
 
-## Acknowledgements
+## 致谢
 
-- [@beastrobin](https://github.com/beastrobin) — the reserved-method-name root cause analysis in #1 that directly led to the v0.5.1 fix
-- [@mlosun](https://github.com/mlosun) — the thorough reproduction and root cause report in #2
-- [@Choi-Peng](https://github.com/Choi-Peng) — triage help pointing affected users to the fix in #5
+- [@beastrobin](https://github.com/beastrobin) —— #1 中对保留方法名的根因分析，直接促成 v0.5.1 修复
+- [@mlosun](https://github.com/mlosun) —— #2 中详尽的复现与根因报告
+- [@Choi-Peng](https://github.com/Choi-Peng) —— #5 中协助把受影响用户指引到修复版本
 
-## License
+## 许可证
 
 MIT
