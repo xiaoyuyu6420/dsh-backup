@@ -1,7 +1,7 @@
 {
   "name": "@xiaoyuyu6420/dsh-backup",
   "version": "0.12.0",
-  "description": "Backup, restore, download and GitHub-sync DeepSeek Harness user data (~/.dsh): /backup, scheduled auto-backup that survives restarts, sha256 checksums, integrity verify, rotation, credential redaction with a local vault (plaintext never leaves the machine), cross-machine restore preflight with github pull, and a visual Settings panel. Cross-platform (macOS/Linux/Windows). 一键备份与恢复 DSH 数据：定时自动备份、完整性校验、凭据默认脱敏（明文只存本机 vault）、跨机恢复预检与 github pull 拉取，附 Settings 可视面板。",
+  "description": "一键备份与恢复 DeepSeek Harness（dsh）的全部用户数据（~/.dsh）：定时自动备份、升级快照、会话日志体检修复、迁移预检、宿主起不来也能用的救援通道、凭据脱敏、GitHub 同步跨机迁移，附可视化面板。 One command to back up & restore all of ~/.dsh: /backup, scheduled auto-backup, upgrade snapshots, session doctor & repair, migrate precheck, out-of-process rescue console, credential redaction, GitHub sync.",
   "type": "module",
   "packageManager": "pnpm@11.24.0",
   "main": "lib/index.js",
