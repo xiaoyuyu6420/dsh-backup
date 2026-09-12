@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * 原地升级 e2e：模拟老用户从 npm 正式版 0.11.0 更新到本地 tarball 0.11.1。
+ * 原地升级 e2e：模拟老用户从 npm 上的旧正式版（UPGRADE_OLD_SPEC）更新到本地打包的新版 tarball（UPGRADE_TARBALL），
+ * 新旧期望版本分别从 spec 与 tarball 动态推导。
  *
  * 用法：UPGRADE_TARBALL=/path/to/xiaoyuyu6420-dsh-backup-0.11.1.tgz node scripts/e2e-upgrade.mjs
  * 前提：PATH 里有 `dsh` CLI。可用 PHASE1_DSH/PHASE2_DSH 指定两个不同列车的
@@ -8,8 +9,8 @@
  *
  * 覆盖（发布前的"老用户能不能平滑更新"验收）：
  *   1. 旧版从 npm registry 安装成功且版本正确（真实老用户状态）
- *   2. 旧版世界里：自定义设置落盘 + 健康会话日志 + 归档 A（由 0.11.0 创建）
- *   3. tarball 覆盖更新成功且安装目录版本变为 0.11.1
+ *   2. 旧版世界里：自定义设置落盘 + 健康会话日志 + 归档 A（由旧版创建）
+ *   3. tarball 覆盖更新成功且安装目录版本变为新版期望版本
  *   4. 更新后：设置无损（keep 保留）、归档 A 仍在列表、老归档 dry-run 可恢复、
  *      doctorScan 干净、新版还能继续产生归档 B
  *
@@ -30,7 +31,11 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const BOOT_TIMEOUT_MS = 90_000;
 const OLD_SPEC = process.env.UPGRADE_OLD_SPEC || '@xiaoyuyu6420/dsh-backup@0.11.0';
 const NEW_TARBALL = process.env.UPGRADE_TARBALL || '/tmp/dsh-pack-0111/xiaoyuyu6420-dsh-backup-0.11.1.tgz';
-const NEW_VERSION = '0.11.2';
+// 新版期望版本从 NEW_TARBALL 内 package.json 读取（与旧版断言同思路：不写死，换版本对不改脚本）
+const NEW_VERSION = (() => {
+  const r = spawnSync('tar', ['-xOf', NEW_TARBALL, 'package/package.json'], { encoding: 'utf8' });
+  try { return JSON.parse(r.stdout).version || ''; } catch { return ''; }
+})();
 // 旧版期望版本从 UPGRADE_OLD_SPEC 的 @version 段推导（无 @ 段时视为 latest，跳过版本断言）
 const OLD_VERSION = (() => { const m = OLD_SPEC.match(/@([^@/]+)$/); return m ? m[1] : ''; })();
 const SKIP_OLD_VERSION_ASSERT = OLD_VERSION === '';
@@ -173,6 +178,8 @@ async function main() {
   console.log(`[e2e-upgrade] repo=${repoRoot} port=${PORT}`);
   console.log(`[e2e-upgrade] 旧版=${OLD_SPEC} 新版 tarball=${NEW_TARBALL}`);
   if (!fs.existsSync(NEW_TARBALL)) throw new Error(`找不到新版 tarball：${NEW_TARBALL}`);
+  if (!NEW_VERSION) throw new Error(`读不出 tarball 版本（package/package.json）：${NEW_TARBALL}`);
+  console.log(`[e2e-upgrade] 期望版本：旧=${OLD_VERSION || 'latest（跳过断言）'} 新=${NEW_VERSION}`);
 
   const ver1 = run(PHASE1_DSH, ['--version']).trim();
   const ver2 = run(PHASE2_DSH, ['--version']).trim();
@@ -182,7 +189,7 @@ async function main() {
   console.log(`[e2e-upgrade] 隔离 home=${home}`);
 
   // ---------- 阶段一：安装 npm 上的旧正式版 ----------
-  console.log('\n[阶段一] 老用户世界：npm 安装 0.11.0');
+  console.log(`\n[阶段一] 老用户世界：npm 安装 ${OLD_SPEC}`);
   run('dsh', ['plugin', '--profile', 'web', 'add', OLD_SPEC], { env: { ...process.env, DSH_HOME: home }, cwd: path.dirname(home) });
   let inst = installedPluginJson();
   if (SKIP_OLD_VERSION_ASSERT) {
@@ -236,7 +243,7 @@ async function main() {
   await stopBoot();
 
   // ---------- 阶段二：tarball 覆盖更新 ----------
-  console.log('\n[阶段二] 更新：tarball 安装 0.11.1');
+  console.log(`\n[阶段二] 更新：tarball 安装 ${NEW_VERSION}`);
   let updatedVia = 'add';
   try {
     run('dsh', ['plugin', '--profile', 'web', 'add', NEW_TARBALL], { env: { ...process.env, DSH_HOME: home }, cwd: path.dirname(home) });
