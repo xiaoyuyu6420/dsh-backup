@@ -1347,16 +1347,24 @@ async function main() {
         // ⑧ 凭据扁平布局（哨兵应存底）
         await fs.writeFile(path.join(gdsh, '.credentials.yaml'), 'DEEPSEEK_KEY: sk-xxx\n');
         const mc = await gmock.tool().execute({ mode: 'migrate' }, {});
+        // 无 zstd 运行时（Node <22.15/23.8，如 CI 的 20 矩阵）：三个 .zstd 样本
+        // 按设计走 skipped——期望值按运行时能力分支
+        const hasZstd = typeof zlib.zstdCompressSync === 'function';
+        const expFail = hasZstd ? 5 : 2;
+        const expSkip = hasZstd ? 0 : 3;
         ok(mc.scanned === 7, `迁移预检扫到 7 个会话日志（实际 ${mc.scanned} :: ${String(mc.summary).slice(0, 200)}）`);
-        ok(mc.failCount === 5, `5 个文件命中静态拒绝规则（实际 ${mc.failCount}）`);
+        ok(mc.failCount === expFail && mc.skippedCount === expSkip, `静态拒绝 ${expFail} 个 + skipped ${expSkip} 个（实际 fail=${mc.failCount} skip=${mc.skippedCount}）`);
         const byDir = Object.fromEntries(mc.sessions.map((s) => [s.path.split('/').slice(-2)[0], s]));
-        ok(byDir['mig-desc2']?.findings.some((f) => f.rule === 'descriptor-version'), 'v0 descriptor version:2 被检出（#6297/#6045）');
+        if (hasZstd) {
+          ok(byDir['mig-desc2']?.findings.some((f) => f.rule === 'descriptor-version'), 'v0 descriptor version:2 被检出（#6297/#6045）');
+          ok(byDir['mig-kind']?.findings.some((f) => f.rule === 'unknown-source-kind'), 'v2 未知 source.kind 被检出（#6355）');
+          ok(byDir['mig-name']?.findings.some((f) => f.rule === 'name-version-mismatch'), '文件名代际不一致被检出');
+        }
         ok(byDir['mig-perm']?.findings.some((f) => f.rule === 'permission-preset-members'), 'v0 permission/preset origin 被检出（#6297）');
-        ok(byDir['mig-kind']?.findings.some((f) => f.rule === 'unknown-source-kind'), 'v2 未知 source.kind 被检出（#6355）');
         ok(byDir['mig-ptc']?.findings.some((f) => f.rule === 'ptc-reserved-v2'), 'v2 保留 PTC 标签被检出');
-        ok(byDir['mig-name']?.findings.some((f) => f.rule === 'name-version-mismatch'), '文件名代际不一致被检出');
-        // 工具面只回 fail 项；健康项由计数判定：7 = 5 fail + 1 migratable + 1 ok
-        ok(mc.migratableCount === 1 && mc.failCount === 5 && mc.scanned === 7 && mc.skippedCount === 0, '健康旧代判 migratable、当前代判 ok（计数闭合）');
+        // 工具面只回 fail 项；健康项由计数判定：
+        // zstd 可用 7 = 5 fail + 1 migratable + 1 ok；不可用 7 = 2 fail + 1 migratable + 1 ok + 3 skipped
+        ok(mc.migratableCount === 1 && mc.scanned === 7, '健康旧代判 migratable、当前代判 ok（计数闭合）');
         ok(mc.env.hardlink === true, '硬链接探测通过');
         ok(mc.env.credentialsFlat === true, '扁平凭据布局被识别');
         const presDir = path.join(groot, 'vault', 'preserved');
