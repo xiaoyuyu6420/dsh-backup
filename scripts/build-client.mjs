@@ -51,15 +51,16 @@ await build({
   minify: true,
   legalComments: 'none',
   define: { 'process.env.NODE_ENV': JSON.stringify('production') },
-  banner: { js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {` },
+  banner: {
+    // CJS shim 必须在 factory 体内：本产物以经典脚本加载，顶层 var module/exports
+    // 会创建 window.module，把 Monaco 等 AMD loader 误判成 Node 环境（#85）。
+    js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {\nvar module = { exports: {} }; var exports = module.exports;`,
+  },
   footer: { js: 'return module.exports; } });' },
   write: false,
 }).then(async (result) => {
   for (const file of result.outputFiles) {
-    // 工厂内需要 module.exports 语义；esbuild CJS 输出引用自身作用域，安全。
-    let text = file.text;
-    text = 'var module = { exports: {} }; var exports = module.exports;\n' + text;
-    await writeFile(file.path, text);
+    await writeFile(file.path, file.text);
   }
   const size = (await readFile(OUT)).length;
   console.log(`built ${path.relative(process.cwd(), OUT)} (${(size / 1024).toFixed(1)} KB)`);
