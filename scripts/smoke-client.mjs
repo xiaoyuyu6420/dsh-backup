@@ -35,6 +35,20 @@ async function main() {
   const pkgName = JSON.parse(await readFile(path.join(REPO, 'package.json'), 'utf8')).name;
   ok(entry !== undefined && entry.id === pkgName, `bundle 以 id=${entry?.id} 注册`);
 
+  // 经典脚本语义回归（#85）：new Function 会把顶层 var 关进函数作用域，测不出
+  // 泄漏；vm.runInContext 的顶层 var 落到沙箱全局，与浏览器 <script> 行为一致。
+  console.log('1b) 经典脚本加载不得污染全局');
+  {
+    const vm = await import('node:vm');
+    let entryCs;
+    const sandbox = { window: { __ModuleLoader__: { load: (e) => { entryCs = e; } } } };
+    vm.createContext(sandbox);
+    vm.runInContext(bundle, sandbox, { filename: 'lib/client.js' });
+    ok(entryCs !== undefined && entryCs.id === pkgName, '经典脚本路径下握手正常');
+    ok(!('module' in sandbox), '顶层 var module 未泄漏为全局');
+    ok(!('exports' in sandbox), '顶层 var exports 未泄漏为全局');
+  }
+
   const requireShim = (id) => {
     if (id === 'react') return require('react');
     if (id === 'react/jsx-runtime') return require('react/jsx-runtime');
