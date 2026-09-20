@@ -84,6 +84,10 @@ function run(argv, cwd) {
   return r.stdout.toString('utf8');
 }
 
+// #88：同 lib/index.js——parent 由字符串截取求得，DSH_HOME 挂盘符根时退化
+// 为 'D:'，裸盘符作 tar -C 会失败。-C 一律传补过分隔符的值。
+const parentTar = (p) => (p.endsWith('/') ? p : `${p}/`);
+
 async function sha256File(absPath) {
   const info = await fs.stat(absPath);
   if (info.size > HASH_MAX_BYTES) throw new Error(`文件 ${Math.floor(info.size / 1048576)}MB 超过哈希上限`);
@@ -420,7 +424,7 @@ async function doctorRepair(root, dshHome, selector) {
     kept.push(keep);
   }
   try {
-    run(['tar', '-xzf', picked.name, '-C', parent, ...targets.map((t) => t.entry)], root);
+    run(['tar', '-xzf', picked.name, '-C', parentTar(parent), ...targets.map((t) => t.entry)], root);
   } catch (err) {
     const reason = err && err.message ? err.message : String(err);
     const restored = new Set();
@@ -493,7 +497,13 @@ async function restoreArchive(root, selector, apply) {
     const sensitiveNow = new Set(SENSITIVE_DEFAULTS);
     if (Array.isArray(redactedFiles)) for (const rel of redactedFiles) sensitiveNow.add(rel);
     const redactFlags = [...sensitiveNow].flatMap((rel) => [`--exclude=${base}/${rel}`, `--exclude=*/${rel}`]);
-    run(['tar', '--exclude=*node_modules*', '--exclude=.system', ...redactFlags, '-czf', snapshotName, '-C', parent, base], root);
+    try {
+      run(['tar', '--exclude=*node_modules*', '--exclude=.system', ...redactFlags, '-czf', snapshotName, '-C', parentTar(parent), base], root);
+    } catch (err) {
+      // tar 失败留下的空壳快照不能留在恢复点列表里冒充可用备份（#88）
+      await fs.rm(`${root}/${snapshotName}`, { force: true }).catch(() => {});
+      throw err;
+    }
     // 清掉上一次的 pre-restore 快照（只保留本次），防累积
     for (const name of await fs.readdir(root)) {
       if (name.startsWith('dsh-pre-restore-') && name !== snapshotName) {
@@ -510,7 +520,7 @@ async function restoreArchive(root, selector, apply) {
     aside = `${parent}/${asideName}`;
   }
   try {
-    run(['tar', '-xzf', picked.name, '-C', parent], root);
+    run(['tar', '-xzf', picked.name, '-C', parentTar(parent)], root);
   } catch (err) {
     const reason = err && err.message ? err.message : String(err);
     let rolledBack = false;

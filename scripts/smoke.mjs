@@ -130,8 +130,8 @@ function makeCtx({ home, dsh, env }) {
         return {
           get: (name) => {
             if (name === 'HOME') return { value: home };
-            if (name === 'DSH_HOME') return { value: `${home}/.dsh` };
             if (env && name in env) return { value: env[name] };
+            if (name === 'DSH_HOME') return { value: `${home}/.dsh` };
             return undefined;
           },
         };
@@ -1448,6 +1448,49 @@ async function main() {
         ok(rescan.ok === true, `修复后复扫全绿${rescan.ok === false ? `: ${JSON.stringify(rescan.corrupt).slice(0, 160)}` : ''}`);
       } finally {
         await fs.rm(envH.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('28) #88 路径边界：盘符根 parent 退化 + DSH_HOME 尾斜杠');
+    {
+      // (a) 纯逻辑（与 smoke-settings 同款提取惯例）：镜像 paths() 的归一化
+      // 与 base/parent/parentTar 求法，跨平台断言 Windows 盘符根等布局。
+      const toFwd = (p) => (p.includes('\\') ? p.split('\\').join('/') : p);
+      const normalize = (raw, home) => {
+        const dshHomeRaw = raw || (home ? `${home}/.dsh` : undefined);
+        return dshHomeRaw ? toFwd(dshHomeRaw).replace(/\/+$/, '') || '/' : undefined;
+      };
+      const split = (dshHome) => {
+        const base = dshHome.split('/').pop();
+        const parent = dshHome.slice(0, -(base.length + 1)) || '/';
+        return { base, parent, parentTar: parent.endsWith('/') ? parent : `${parent}/` };
+      };
+      let s88 = split(normalize('D:\\dsh_data\\', 'C:/Users/Hyperos'));
+      ok(s88.base === 'dsh_data' && s88.parent === 'D:' && s88.parentTar === 'D:/', `盘符根布局：parent 'D:' → parentTar 'D:/'（-C 可用）`);
+      s88 = split(normalize('D:/dsh_data/', 'C:/Users/Hyperos'));
+      ok(s88.base === 'dsh_data' && s88.parent === 'D:' && s88.parentTar === 'D:/', `DSH_HOME 尾斜杠归一化：base 不再变空串（实际 base='${s88.base}' parent='${s88.parent}'）`);
+      s88 = split(normalize(undefined, '/home/u'));
+      ok(s88.base === '.dsh' && s88.parent === '/home/u' && s88.parentTar === '/home/u/', 'POSIX 常规布局：parent 补斜杠不回归');
+      s88 = split(normalize('/', 'C:/Users/Hyperos'));
+      ok(s88.parent === '/' && s88.parentTar === '/', `DSH_HOME='/' 兜底保持根（parent='${s88.parent}'）`);
+
+      // (b) e2e：DSH_HOME 带尾斜杠的真实备份。修复前 base='' → parent 退化为
+      // 源目录本身、tar 位置参数成空串 → exit 1 / 0 字节坏包；修复后正常出档。
+      const envE = await mkTmpHome();
+      try {
+        const mockE = makeCtx({ home: envE.home, dsh: envE.dsh, env: { DSH_HOME: `${envE.dsh}/` } });
+        plugin(mockE.ctx, { destination: `~/Desktop/dsh-backups`, keep: 7 });
+        const rE = await mockE.handler('');
+        ok(rE.kind === 'success', `尾斜杠 DSH_HOME /backup 成功: ${rE.kind === 'success' ? rE.text.split('\n')[0] : rE.text}`);
+        const archE = await listArchives(envE.root);
+        ok(archE.length === 1, `生成 1 份归档（实际 ${archE.length}）`);
+        if (archE.length) {
+          const entriesE = await tarList(envE.root, archE[0]);
+          ok(entriesE.some((e) => e.includes('settings.json')), '尾斜杠归档内容完整（含 settings.json）');
+          ok(await fs.stat(`${envE.root}/${archE[0]}.sha256`).then(() => true, () => false), '尾斜杠备份 .sha256 边车存在');
+        }
+      } finally {
+        await fs.rm(envE.dir, { recursive: true, force: true });
       }
     }
 
