@@ -98,6 +98,12 @@ export const zh = {
   settingsSaveError: '保存失败，请重试。',
   keepAria: '保留份数',
   settingsSourceHint: '默认值来自 cordis.patch.yml；在此修改会保存到 settings.yaml 并立即生效，无需重启。',
+  // Update card（插件自更新）
+  updateTitle: '插件更新',
+  updateHint: '检查 npm 最新版本。一键更新前自动生成升级前快照；完成后请重启 dsh web 生效（宿主启动时装载插件，不支持运行中热替换）。',
+  updateCheck: '检查更新',
+  updateNow: '更新到 {latest}',
+  updateAutoLabel: '打开面板时自动检查更新',
 };
 
 export const en = {
@@ -196,4 +202,10 @@ export const en = {
   settingsSaveError: 'Save failed, please retry.',
   keepAria: 'Keep count',
   settingsSourceHint: 'Defaults come from cordis.patch.yml; edits here are saved to settings.yaml and apply immediately — no restart needed.',
+  // Update card (self-update)
+  updateTitle: 'Plugin updates',
+  updateHint: 'Checks the npm registry for a newer version. A pre-upgrade snapshot is taken automatically before updating; restart dsh web afterwards for it to take effect (plugins are loaded at host startup, not hot-swappable).',
+  updateCheck: 'Check for updates',
+  updateNow: 'Update to {latest}',
+  updateAutoLabel: 'Auto-check when the panel opens',
 };

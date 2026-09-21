@@ -72,7 +72,7 @@ function assertPanelMethodAvailable(namespace, method) {
 }
 
 // ---------- DSH 服务桩 ----------
-function makeCtx({ home, dsh, env }) {
+function makeCtx({ home, dsh, env, fake }) {
   const intervals = [];
   const timeouts = [];
   const handlers = new Map();
@@ -82,6 +82,8 @@ function makeCtx({ home, dsh, env }) {
   let tool = null;
 
   async function resolveExecutable(name) {
+    // fake：场景注入的假外部命令（如 dsh CLI），优先于真实 PATH
+    if (fake && fake[name]) return `__fake__:${name}`;
     if (IS_WIN) {
       if (name === 'tar') return 'tar'; // Windows 10+ 自带 System32\tar.exe
       if (name === 'git') return 'git'; // Git Bash / Git for Windows
@@ -102,7 +104,14 @@ function makeCtx({ home, dsh, env }) {
         },
       };
     }
-    const child = spawn(spec.argv[0], spec.argv.slice(1), { cwd: spec.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    // 假命令替换：argv[0] 形如 `__fake__:dsh` 时换成 fake.dsh 的启动数组
+    let argv = spec.argv;
+    if (typeof argv[0] === 'string' && argv[0].startsWith('__fake__:')) {
+      const key = argv[0].slice('__fake__:'.length);
+      const base = fake && fake[key];
+      if (base) argv = [...base, ...argv.slice(1)];
+    }
+    const child = spawn(argv[0], argv.slice(1), { cwd: spec.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (d) => { out += d; });
@@ -438,7 +447,7 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair', 'backupPanel/migrateCheck', 'backupPanel/setGithubToken']), `14 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair', 'backupPanel/migrateCheck', 'backupPanel/setGithubToken', 'backupPanel/checkUpdate', 'backupPanel/update']), `16 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
@@ -812,7 +821,7 @@ async function main() {
     console.log('19) RPC 方法名保留字预检（#2 事故防复发，issue #9）');
     const contrib19 = mock.typertContribs[0];
     const methods19 = contrib19 ? contrib19.invocations.map((d) => d.method) : [];
-    ok(methods19.length === 14, `注册了 ${methods19.length} 个 RPC 方法（期望 14）`);
+    ok(methods19.length === 16, `注册了 ${methods19.length} 个 RPC 方法（期望 16）`);
     let reservedHit = null;
     for (const name of methods19) {
       try { assertPanelMethodAvailable('backupPanel', name); } catch { reservedHit = name; }
@@ -1491,6 +1500,54 @@ async function main() {
         }
       } finally {
         await fs.rm(envE.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('29) 更新感知 + 一键更新（check-update / update）');
+    {
+      const realFetch = globalThis.fetch;
+      const pkgMeta = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+      const env29 = await mkTmpHome();
+      const logPath = path.join(env29.dir, 'dsh-argv.log');
+      const mock29 = makeCtx({
+        home: env29.home,
+        dsh: env29.dsh,
+        fake: { dsh: [process.execPath, path.join(REPO, 'scripts', 'fixtures', 'fake-dsh.mjs'), logPath] },
+      });
+      plugin(mock29.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+      const run29 = mock29.handler;
+      try {
+        // (a) 有新版：registry 返回 9.9.9 → 检查可见、一键更新走 dsh CLI、快照先留
+        globalThis.fetch = async () => ({ ok: true, json: async () => ({ 'dist-tags': { latest: '9.9.9' } }) });
+        const c1 = await run29('check-update');
+        ok(c1.kind === 'success' && c1.text.includes('9.9.9'), `check-update 发现新版本: ${c1.text.split('\n')[0]}`);
+        const u1 = await run29('update');
+        ok(u1.kind === 'success' && u1.text.includes('9.9.9') && u1.text.includes('快照') && u1.text.includes('重启'), `update 回执完整（版本+快照+重启）: ${u1.text.split('\n').join(' | ')}`);
+        const snaps29 = await fs.readdir(env29.root).then((ns) => ns.filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz')));
+        ok(snaps29.length === 1, `更新前快照已生成（实际 ${snaps29.length} 份）`);
+        const argvLog = (await fs.readFile(logPath, 'utf8')).trim();
+        ok(argvLog === JSON.stringify(['plugin', '--profile', 'web', 'update', pkgMeta.name]), `dsh CLI argv 正确: ${argvLog.slice(0, 80)}`);
+        // (b) 网络失败：check 与 update 都静默降级为可读错误，绝不抛异常阻断
+        globalThis.fetch = async () => { throw new Error('ENOTFOUND registry.npmjs.org'); };
+        const c2 = await run29('check-update');
+        ok(c2.kind === 'error' && c2.text.includes('检查更新失败'), `离线时 check-update 降级为可读错误`);
+        const u2 = await run29('update');
+        ok(u2.kind === 'error' && u2.text.includes('手动执行') && u2.text.includes('dsh plugin'), `离线时 update 给出手动命令而非空错误`);
+        // (c) 已是最新：registry 返回当前版本 → update 短路，不拍快照不动 dsh
+        globalThis.fetch = async () => ({ ok: true, json: async () => ({ 'dist-tags': { latest: pkgMeta.version } }) });
+        const c3 = await run29('check-update');
+        ok(c3.kind === 'success' && c3.text.includes('已是最新版本'), `已最新时提示正确`);
+        const logBefore = (await fs.readFile(logPath, 'utf8')).trim();
+        const u3 = await run29('update');
+        const logAfter = (await fs.readFile(logPath, 'utf8')).trim();
+        ok(u3.kind === 'success' && u3.text.includes('已是最新版本') && logBefore === logAfter, `已最新时 update 短路（不调 dsh）`);
+        // (d) 版本倒挂不算更新：latest < current
+        globalThis.fetch = async () => ({ ok: true, json: async () => ({ 'dist-tags': { latest: '0.0.1' } }) });
+        const c4 = await run29('check-update');
+        ok(c4.kind === 'success' && c4.text.includes('已是最新版本'), `版本倒挂不误报更新（0.0.1 < ${pkgMeta.version}）`);
+      } finally {
+        globalThis.fetch = realFetch;
+        await fs.rm(env29.dir, { recursive: true, force: true });
       }
     }
 
