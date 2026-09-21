@@ -122,6 +122,23 @@ const setGithubRepoSchema = z.object({
   summary: z.string(),
 });
 
+const updateCheckSchema = z.object({
+  ok: z.boolean(),
+  current: z.string(),
+  latest: z.string().nullable(),
+  update: z.boolean(),
+  error: z.string().nullable(),
+  summary: z.string(),
+});
+
+const updateSchema = z.object({
+  ok: z.boolean(),
+  updated: z.boolean(),
+  current: z.string().nullable(),
+  latest: z.string().nullable(),
+  summary: z.string(),
+});
+
 const keepParam = { name: 'keep', wire: 'keep', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#keep', schema: z.number().int().positive().optional() }, acceptsUndefined: true };
 const selectorParam = { name: 'selector', wire: 'selector', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#selector', schema: z.string().optional() }, acceptsUndefined: true };
 const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#dryRun', schema: z.boolean().optional() }, acceptsUndefined: true };
@@ -161,6 +178,8 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('githubPull', [], githubPullSchema, true),
     strictDescriptor('removeEntry', [selectorParam], removeSchema, true),
     strictDescriptor('setGithubRepo', [repoParam], setGithubRepoSchema, false),
+    strictDescriptor('checkUpdate', [], updateCheckSchema, true),
+    strictDescriptor('update', [], updateSchema, true),
   ]),
 });
 
@@ -219,6 +238,8 @@ export function apply(ctx) {
       githubPull: async () => unwrap(await ns().githubPull()),
       removeEntry: async (selector) => unwrap(await ns().removeEntry(selector)),
       setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
+      checkUpdate: async () => unwrap(await ns().checkUpdate()),
+      update: async () => unwrap(await ns().update()),
     };
     scope.slots.inject('settings.plugins.tab', () => scope.slots.register({
       name: 'settings.plugins.tab',

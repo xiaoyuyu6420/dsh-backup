@@ -62,6 +62,9 @@ export function BackupTab({ panel, t }) {
   const [destInput, setDestInput] = useState('');
   const [keepInput, setKeepInput] = useState('');
   const [excludeInput, setExcludeInput] = useState('');
+  const [updateCheckInput, setUpdateCheckInput] = useState(false);
+  // 更新感知（A）：checkUpdate 的结构化结果（null=尚未检查）
+  const [update, setUpdate] = useState(null);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState(''); // '' | 'saving' | 'saved' | 'error'
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -76,6 +79,7 @@ export function BackupTab({ panel, t }) {
     setDestInput(data.destination || '');
     setKeepInput(data.keep > 0 ? String(data.keep) : '');
     setExcludeInput(Array.isArray(data.exclude) ? data.exclude.join(', ') : '');
+    setUpdateCheckInput(data.updateCheck === true);
     setSettingsDirty(false);
   };
 
@@ -138,6 +142,42 @@ export function BackupTab({ panel, t }) {
     setConfirmDelete(null);
     void run(`delete:${name}`, () => panel.removeEntry(name)).then(reload);
   };
+
+  // 更新感知（A）：结构化结果落卡（检查/更新按钮态），结果文案落横幅
+  const checkForUpdate = async () => {
+    setBusy('update-check');
+    try {
+      const u = await panel.checkUpdate();
+      setUpdate(u);
+      setBanner({ ok: u.ok !== false, text: u.summary || '' });
+    } catch (err) {
+      setBanner({ ok: false, text: String(err && err.message ? err.message : err) });
+    } finally {
+      setBusy('');
+    }
+  };
+  const updateNow = async () => {
+    setBusy('update');
+    try {
+      const r = await panel.update();
+      setBanner({ ok: r.ok !== false, text: r.summary || '' });
+      setUpdate((prev) => (r.ok && r.updated ? { ...(prev || {}), current: r.current, latest: r.latest, update: false } : prev));
+    } catch (err) {
+      setBanner({ ok: false, text: String(err && err.message ? err.message : err) });
+    } finally {
+      setBusy('');
+    }
+  };
+
+  // 开启「自动检查」时：面板加载后静默查一次；有新版本只更新卡状态，不弹打扰
+  useEffect(() => {
+    if (settings?.updateCheck !== true || update !== null) return undefined;
+    let current = true;
+    void panel.checkUpdate()
+      .then((u) => { if (current) setUpdate(u); })
+      .catch(() => { /* 静默：检查失败不打扰，卡上有手动按钮 */ });
+    return () => { current = false; };
+  }, [settings, update, panel]);
 
   // 预览刻意不走 run()：dry-run 的 summary 已由弹窗承载，再落横幅会重复。
   const previewRestore = async (name, types) => {
@@ -208,6 +248,7 @@ export function BackupTab({ panel, t }) {
           destination: destInput.trim(),
           keep: Number.isFinite(keep) && keep >= 1 ? Math.floor(keep) : 0,
           exclude,
+          updateCheck: updateCheckInput === true,
           revision: settingsRevision,
         }),
       });
@@ -278,6 +319,7 @@ export function BackupTab({ panel, t }) {
     if (field === 'destination') setDestInput(value);
     else if (field === 'keep') setKeepInput(value);
     else if (field === 'exclude') setExcludeInput(value);
+    else if (field === 'updateCheck') setUpdateCheckInput(value === true);
   };
 
   // 保存前客户端校验：给出 inline 原因，而不是静默禁用保存按钮
@@ -358,6 +400,14 @@ export function BackupTab({ panel, t }) {
                       placeholder="*cache*, *.tmp"
                     />
                     <span className="dsb-hint">{t('settingsExcludeHint')}</span>
+                  </dd>
+                  <dt>{t('updateAutoLabel')}</dt>
+                  <dd>
+                    <input
+                      type="checkbox"
+                      checked={updateCheckInput}
+                      onChange={(e) => onSettingsFieldChange('updateCheck', e.target.checked)}
+                    />
                   </dd>
                 </dl>
                 <div className="dsb-row" style={{ marginTop: '8px' }}>
@@ -679,6 +729,30 @@ export function BackupTab({ panel, t }) {
               <p className="dsb-status">{t('typedHint')}</p>
             </div>
           ) : null}
+
+          <div className="dsb-card">
+            <h3 className="dsb-heading">
+              <span>{t('updateTitle')}</span>
+              {update ? <span className="dsb-badge">{update.current}</span> : null}
+            </h3>
+            <p className="dsb-hint">{t('updateHint')}</p>
+            <div className="dsb-row">
+              <button
+                type="button" className="dsb-btn-secondary"
+                disabled={busy !== ''} onClick={() => void checkForUpdate()}
+              >
+                {busy === 'update-check' ? t('busy') : t('updateCheck')}
+              </button>
+              {update && update.ok && update.update ? (
+                <button
+                  type="button" className="dsb-btn-primary"
+                  disabled={busy !== ''} onClick={() => void updateNow()}
+                >
+                  {busy === 'update' ? t('busy') : t('updateNow').replace('{latest}', update.latest || '')}
+                </button>
+              ) : null}
+            </div>
+          </div>
 
           <p className="dsb-feedback">
             {t('feedbackHint')}{' '}

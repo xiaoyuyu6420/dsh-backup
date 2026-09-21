@@ -13,7 +13,7 @@
 
 // ---------- 从 lib/index.js 提取的归一化/校验逻辑（纯函数，无副作用） ----------
 
-const SETTINGS_FIELDS = ['destination', 'keep', 'exclude', 'redact', 'githubRepo'];
+const SETTINGS_FIELDS = ['destination', 'keep', 'exclude', 'redact', 'githubRepo', 'updateCheck'];
 
 function normalizeField(out, field, value) {
   if (field === 'destination') {
@@ -28,6 +28,8 @@ function normalizeField(out, field, value) {
     else if (Array.isArray(value)) out.redact = value.filter((v) => typeof v === 'string');
   } else if (field === 'githubRepo') {
     if (typeof value === 'string') out.githubRepo = value;
+  } else if (field === 'updateCheck') {
+    if (typeof value === 'boolean') out.updateCheck = value;
   }
 }
 
@@ -216,6 +218,16 @@ console.log('5) normalizeField — githubRepo');
   const out = {};
   normalizeField(out, 'githubRepo', 123);
   ok(out.githubRepo === undefined, '非字符串被拒绝');
+}
+{
+  const out = {};
+  normalizeField(out, 'updateCheck', true);
+  ok(out.updateCheck === true, 'updateCheck: true 被接受');
+}
+{
+  const out = {};
+  normalizeField(out, 'updateCheck', 'yes');
+  ok(out.updateCheck === undefined, 'updateCheck: 非布尔被拒绝');
 }
 
 console.log('6) normalizeField — 未知字段');
