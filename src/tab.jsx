@@ -29,6 +29,24 @@ const TYPE_OPTIONS = [
   ['profiles', 'typeProfiles'],
 ];
 
+/**
+ * 降级标签页（#94 诉求 2）：remote 命名空间挂载失败时给出可见提示，替代
+ * 静默消失——命令行（/backup）与定时备份不受影响，仅可视化面板不可用。
+ */
+export function BackupTabFallback({ panel, t }) {
+  const detail = panel && panel.mountError
+    ? String(panel.mountError && panel.mountError.message ? panel.mountError.message : panel.mountError)
+    : '';
+  return (
+    <div data-dsh-backup="" className="dsb-card">
+      <h3 className="dsb-heading"><span>{t('tab')}</span></h3>
+      <p className="dsb-failure" role="alert">{t('fallbackTitle')}</p>
+      <p className="dsb-hint">{t('fallbackBody')}</p>
+      {detail ? <p className="dsb-hint">{t('fallbackDetail').replace('{detail}', detail)}</p> : null}
+    </div>
+  );
+}
+
 export function BackupTab({ panel, t }) {
   const [snap, setSnap] = useState(null);
   const [github, setGithub] = useState(null);

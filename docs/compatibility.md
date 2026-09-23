@@ -23,7 +23,9 @@ e2e 脚本的断言清单见 `scripts/e2e-host.mjs` 头注释；其中 **HTML �
 | 0.8.0 | 0.1.1-rc.2 | 历史版本 | settings seam |
 | 0.9.0 | 0.1.1-rc.2 | 历史版本 | doctor 体检/救援通道/智能备份三件/恢复保护；发版前全量兼容实测：9 个历史版本真实归档恢复 + 0.7.2/0.8.0→main 真实宿主升级 + 自动备份真定时全绿（598 断言） |
 | 0.11.3（2026-09-12 已发 npm） | 0.1.5-rc.1 / rc.2 | ✅ 本地全量验收绿（2026-09-12） | peers 追加 `^0.1.5-rc.1`（semver 同元组规则覆盖 rc.2）。rc.2 适配面实测为零：六个 node 侧 peer 包 rc.1↔rc.2 **逐字节相同**（tarball diff，导出面零增删），client 包列车未动（dsh-client-runtime 最新仍为 0.1.1-rc.2）。rc.2 真机 e2e 32/32；跨列车原地升级 e2e（rc.1 宿主 + 0.11.2 → rc.2 宿主 + 0.11.3）14/14，设置与归档无损 |
-| 0.12.0（2026-09-12 已发 npm，**当前 latest**） | ✅ 本地全量验收绿（2026-09-12：smoke 256 + e2e-host 34 + 跨列车升级 14） | 新增迁移预检（拒绝规则校准自宿主 0.1.5-rc.2 的冻结清单：v0 51 类 / v2 51 类 / 来源 kind 15 类）与凭据哨兵；peers 不变，声明 `engines.dsh` |
+| 0.12.0（2026-09-12 已发 npm） | ✅ 本地全量验收绿（2026-09-12：smoke 256 + e2e-host 34 + 跨列车升级 14） | 新增迁移预检（拒绝规则校准自宿主 0.1.5-rc.2 的冻结清单：v0 51 类 / v2 51 类 / 来源 kind 15 类）与凭据哨兵；peers 不变，声明 `engines.dsh` |
+| 0.13.0（2026-09-21 已发 npm，**当前 latest**） | 0.1.5-rc.1 / rc.2 | ✅ 本地全量验收绿：smoke 283 + e2e-host 37 + settings 47 + client 25 | 更新感知（`/backup check-update` + 面板卡）与一键更新（`/backup update`，更新前自动留升级前快照）；peers 不变 |
+| 0.13.1+（main，未发版） | 0.1.6-alpha.1 / 0.1.7-alpha.1 | ✅ **真机实测通过（2026-09-23，#94 修复）** | 修 0.1.6+ 面板标签静默消失（#94）：① strict codec 补 `create()` 惰性工厂（0.1.6 起强制，缺失时 `$mount` 抛 "strict codec has no create() factory"）；② `$mount` 改为声明式等待 `remote` 服务就绪；③ 挂载失败注册可见降级标签页。peers 追加 `^0.1.6-alpha.1 \|\| ^0.1.7-alpha.1`。验证：0.1.6-alpha.2 与 0.1.7-alpha.2 隔离环境实机（Built-in plugins 标签页出现、面板各卡片可用） |
 
 ## 归档格式兼容（插件自身）
 
@@ -34,6 +36,8 @@ e2e 脚本的断言清单见 `scripts/e2e-host.mjs` 头注释；其中 **HTML �
 1. **semver prerelease 陷阱**：`^0.1.0-rc.6` 匹配不了 `0.1.1-rc.2`——npm 只允许同 `[major,minor,patch]` 元组的 prerelease 互相满足。每发新 rc 列车，peerDependencies 必须跟着升。
 2. **客户端列车陷阱**：插件 web 面板依赖宿主 HTML 预加载 `/plugins/<pkg>/client.js`。0.1.1-rc+ 的 webserver 才生成预加载；旧列车上 node 侧一切正常但浏览器报 `client-modules: HTML did not preload @deepseek-ai/dsh-client-modules/client.js`。peerDependencies 表达不了这个约束——e2e 判据 #3 的 HTML 断言就是它的回归防线。
 3. **pnpm 默认 24h 冷却期**：pnpm 10 在 CI 默认启用 `minimumReleaseAge`（供应链保护），新列车发布后 24h 内日常 CI 装 peers 会红。这是**有意保留的防线**：等满即可，不要在日常 CI 加豁免。compat 巡检 job 因职责是追新，显式豁免。
+4. **strict codec 必须带 `create()`（0.1.6 起）**：客户端 Remote 贡献的 strict codec 在 0.1.5 只校验 `schema` 字段，0.1.6 起强制要求惰性工厂 `create()`（缺失时 `$mount` 抛 `strict codec has no create() factory`，且失败是静默的——面板标签直接消失，见 #94）。本仓库 `src/client.js` 的 `strictCodec()` helper 同时提供 `schema`（0.1.5 读）与 `create: () => schema`（0.1.6 读），两代共用同一 zod 实例。
+5. **客户端模块依赖图结算（0.1.6 起）**：插件 client 半在 apply 时不能假设 `ctx.remote` 已就绪——须 `ctx.inject(['remote'], …)` 声明式等待后再 `$mount`；挂载失败必须落可见降级（本仓库用 `BackupTabFallback`），否则用户只看到"设置里没有这一项"。`window.__ModuleLoader__.load({id, factory})` 经典脚本体两代通用，不要改成 closure 返回形态（0.1.5 的 script 标签语义下顶层 `return` 是语法错误）。
 
 ## 升列车 SOP
 

@@ -104,6 +104,10 @@ export const zh = {
   updateCheck: '检查更新',
   updateNow: '更新到 {latest}',
   updateAutoLabel: '打开面板时自动检查更新',
+  // 降级标签页（remote 挂载失败时的可见提示）
+  fallbackTitle: '备份面板暂时无法加载。',
+  fallbackBody: '命令与定时备份不受影响（/backup 仍可用）。可尝试重启 dsh web；若反复出现，请到插件仓库提 issue。',
+  fallbackDetail: '技术细节：{detail}',
 };
 
 export const en = {
@@ -208,4 +212,8 @@ export const en = {
   updateCheck: 'Check for updates',
   updateNow: 'Update to {latest}',
   updateAutoLabel: 'Auto-check when the panel opens',
+  // Fallback tab (visible hint when the remote mount fails)
+  fallbackTitle: 'The backup panel could not load right now.',
+  fallbackBody: 'Commands and scheduled backups are unaffected (/backup still works). Try restarting dsh web; if it keeps happening, please file an issue.',
+  fallbackDetail: 'Technical details: {detail}',
 };

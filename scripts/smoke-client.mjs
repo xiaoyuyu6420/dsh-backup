@@ -71,7 +71,24 @@ async function main() {
     remote: {
       $mount: async (c) => { contributions.push(c); return async () => {}; },
     },
-    inject: (names, cb) => { if (names.includes('remote.backupPanel')) scopedCallback = cb; },
+    inject: (names, cb) => {
+      // 新结构（#94 适配）：inject(['slots','locale']) 外层作用域 → inject(['remote'])
+      // 等 remote 服务就绪（其回调里 $mount）→ 嵌套 inject(['remote.backupPanel'])。
+      // 桩模拟三服务都已就绪、同步回调。
+      if (names.includes('slots') || names.includes('locale')) {
+        cb({
+          locale: { bind: () => (k) => k },
+          slots: {
+            inject: (seat, fn) => { tabRegistrations.push(fn); },
+            register: (def, comp) => ({ def, comp }),
+          },
+        });
+      }
+      if (names.includes('remote')) {
+        cb({ remote: { $mount: async (c) => { contributions.push(c); return async () => {}; } } });
+      }
+      if (names.includes('remote.backupPanel')) scopedCallback = cb;
+    },
   };
 
   globalThis.document = {
@@ -80,6 +97,40 @@ async function main() {
     head: { append() {} },
   };
   await plugin.apply(ctx);
+
+  // #94 诉求 2：remote 挂载失败时必须落一个可见的降级标签页，而不是静默消失。
+  console.log('2b) remote 挂载失败 → 降级标签页（#94 诉求 2）');
+  {
+    const degradedTabs = [];
+    let mountCalls = 0;
+    const ctxDegraded = {
+      effect: (fn) => { const d = fn(); return () => d?.(); },
+      locale: { register: () => () => {} },
+      inject: (names, cb) => {
+        if (names.includes('slots') || names.includes('locale')) {
+          cb({
+            locale: { bind: () => (k) => k },
+            slots: {
+              inject: (seat, fn) => { degradedTabs.push(fn()); },
+              register: (reg, component) => ({ ...reg, component }),
+            },
+          });
+        }
+        if (names.includes('remote')) {
+          cb({ remote: { $mount: async () => { mountCalls += 1; throw new Error('typert: strict codec has no create() factory'); } } });
+        }
+      },
+    };
+    await plugin.apply(ctxDegraded);
+    await new Promise((r) => setTimeout(r, 20));
+    ok(mountCalls === 1, '$mount 被调用一次（声明式等待 remote 后就绪后挂载）');
+    ok(degradedTabs.length === 1 && degradedTabs[0]?.id === 'backup', `挂载失败仍注册标签页（id=${degradedTabs[0]?.id}）`);
+    const R = require('react');
+    const { renderToStaticMarkup: renderDegraded } = require('react-dom/server');
+    const degradedMarkup = renderDegraded(R.createElement(degradedTabs[0].component, { panel: { mountError: new Error('boom') }, t: (k) => k }));
+    ok(degradedMarkup.includes('fallbackTitle') && degradedMarkup.includes('fallbackBody'), '降级页渲染出可见提示（不再静默消失）');
+  }
+
   delete globalThis.document;
 
   ok(dict['settings.backupPanel']?.zh?.tab === '备份' && dict['settings.backupPanel']?.en?.tab === 'Backup', '双语文典已注册');
