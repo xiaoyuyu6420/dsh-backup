@@ -9,7 +9,7 @@
  */
 
 import { z } from 'zod';
-import { BackupTab } from './tab.jsx';
+import { BackupTab, BackupTabFallback } from './tab.jsx';
 import { zh, en } from './locales.js';
 import { installPanelStyles } from './styles.js';
 import pkg from '../package.json' with { type: 'json' };
@@ -139,13 +139,19 @@ const updateSchema = z.object({
   summary: z.string(),
 });
 
-const keepParam = { name: 'keep', wire: 'keep', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#keep', schema: z.number().int().positive().optional() }, acceptsUndefined: true };
-const selectorParam = { name: 'selector', wire: 'selector', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#selector', schema: z.string().optional() }, acceptsUndefined: true };
-const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#dryRun', schema: z.boolean().optional() }, acceptsUndefined: true };
-const syncDepsParam = { name: 'syncDeps', wire: 'syncDeps', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#syncDeps', schema: z.boolean().optional() }, acceptsUndefined: true };
-const hoursParam = { name: 'hours', wire: 'hours', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#hours', schema: z.number().int().min(0).max(720) }, acceptsUndefined: true };
-const repoParam = { name: 'repo', wire: 'repo', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#repo', schema: z.string().optional() }, acceptsUndefined: true };
-const typesParam = { name: 'types', wire: 'types', source: 'json', codec: { mode: 'strict', typeSymbol: 'dsh-backup/types#types', schema: z.array(z.string()).optional() }, acceptsUndefined: true };
+/** strict codec：0.1.5 读 `schema`；0.1.6 起强制 `create()` 惰性工厂（#94）。
+ * 两者指向同一 zod 实例——两代宿主各取所需，行为一致。 */
+function strictCodec(typeSymbol, schema) {
+  return Object.freeze({ mode: 'strict', typeSymbol, schema, create: () => schema });
+}
+
+const keepParam = { name: 'keep', wire: 'keep', source: 'json', codec: strictCodec('dsh-backup/types#keep', z.number().int().positive().optional()), acceptsUndefined: true };
+const selectorParam = { name: 'selector', wire: 'selector', source: 'json', codec: strictCodec('dsh-backup/types#selector', z.string().optional()), acceptsUndefined: true };
+const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: strictCodec('dsh-backup/types#dryRun', z.boolean().optional()), acceptsUndefined: true };
+const syncDepsParam = { name: 'syncDeps', wire: 'syncDeps', source: 'json', codec: strictCodec('dsh-backup/types#syncDeps', z.boolean().optional()), acceptsUndefined: true };
+const hoursParam = { name: 'hours', wire: 'hours', source: 'json', codec: strictCodec('dsh-backup/types#hours', z.number().int().min(0).max(720)), acceptsUndefined: true };
+const repoParam = { name: 'repo', wire: 'repo', source: 'json', codec: strictCodec('dsh-backup/types#repo', z.string().optional()), acceptsUndefined: true };
+const typesParam = { name: 'types', wire: 'types', source: 'json', codec: strictCodec('dsh-backup/types#types', z.array(z.string()).optional()), acceptsUndefined: true };
 
 function strictDescriptor(method, parameters, schema, cancellation) {
   return Object.freeze({
@@ -156,7 +162,8 @@ function strictDescriptor(method, parameters, schema, cancellation) {
     invocation: Object.freeze({ kind: 'direct' }),
     parameters: Object.freeze(parameters.map((p) => Object.freeze({ ...p, codec: Object.freeze(p.codec) }))),
     ...(cancellation ? { cancellation: Object.freeze({ parameter: 'signal' }) } : {}),
-    result: Object.freeze({ mode: 'strict', typeSymbol: `dsh-backup/types#${method}Result`, schema }),
+    // create 是 0.1.6 起强制的惰性 schema 工厂（#94）——见 strictCodec。
+    result: strictCodec(`dsh-backup/types#${method}Result`, schema),
   });
 }
 
@@ -205,42 +212,15 @@ export function apply(ctx) {
   // ctx.effect（$mount 的 namespace 随即清空，tab 注册被级联销毁）。因此
   // $mount 在这里同步注册的 effect 工厂内部异步完成，失败落 console.error；
   // ctx.inject 与宿主插件一样留在同步帧。
-  ctx.effect(() => {
-    let mounted = null;
-    let pending = true;
-    let unloaded = false;
-    void (async () => {
-      try {
-        mounted = await ctx.remote.$mount(BACKUP_REMOTE);
-      } catch (error) {
-        console.error('dsh-backup: backupPanel mount failed:', error);
-      }
-      pending = false;
-      if (unloaded) void mounted?.();
-    })();
-    return () => {
-      unloaded = true;
-      if (!pending) void mounted?.();
-    };
-  }, 'dsh-backup: remote contribution');
-
-  ctx.inject(['remote.backupPanel'], (scope) => {
+  //
+  // 0.1.6 起客户端模块按依赖图分批结算（#94）：apply 执行时 `remote` 服务
+  // 未必已就绪——直接 `ctx.remote.$mount` 会 TypeError 且被静默吞掉，面板
+  // 标签随之消失。改为声明式等待 `remote` 服务本身（两代宿主语义一致），
+  // mount 失败再注册可见的降级标签页，不再静默消失。
+  let degraded = false;
+  const registerTab = (scope, component, panel) => {
+    if (degraded && component !== BackupTabFallback) return;
     const t = scope.locale.bind(NS);
-    const ns = () => scope.remote.backupPanel;
-    const panel = {
-      status: async () => unwrap(await ns().status()),
-      backup: async (keep, types) => unwrap(await ns().backup(keep, types)),
-      verify: async (selector) => unwrap(await ns().verify(selector)),
-      restore: async (selector, dryRun, types, syncDeps) => unwrap(await ns().restore(selector, dryRun, types, syncDeps)),
-      setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
-      githubStatus: async () => unwrap(await ns().githubStatus()),
-      githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
-      githubPull: async () => unwrap(await ns().githubPull()),
-      removeEntry: async (selector) => unwrap(await ns().removeEntry(selector)),
-      setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
-      checkUpdate: async () => unwrap(await ns().checkUpdate()),
-      update: async () => unwrap(await ns().update()),
-    };
     scope.slots.inject('settings.plugins.tab', () => scope.slots.register({
       name: 'settings.plugins.tab',
       id: 'backup',
@@ -248,6 +228,50 @@ export function apply(ctx) {
       label: () => t('tab'),
       locale: NS,
       inject: () => ({ panel }),
-    }, BackupTab));
+    }, component));
+  };
+
+  ctx.inject(['slots', 'locale'], (scope) => {
+    ctx.inject(['remote'], (rscope) => {
+      ctx.effect(() => {
+        let mounted = null;
+        let pending = true;
+        let unloaded = false;
+        void (async () => {
+          try {
+            mounted = await rscope.remote.$mount(BACKUP_REMOTE);
+          } catch (error) {
+            console.error('dsh-backup: backupPanel mount failed:', error);
+            degraded = true;
+            registerTab(scope, BackupTabFallback, { mountError: error });
+          }
+          pending = false;
+          if (unloaded) void mounted?.();
+        })();
+        return () => {
+          unloaded = true;
+          if (!pending) void mounted?.();
+        };
+      }, 'dsh-backup: remote contribution');
+    });
+
+    ctx.inject(['remote.backupPanel'], (scope) => {
+      const ns = () => scope.remote.backupPanel;
+      const panel = {
+        status: async () => unwrap(await ns().status()),
+        backup: async (keep, types) => unwrap(await ns().backup(keep, types)),
+        verify: async (selector) => unwrap(await ns().verify(selector)),
+        restore: async (selector, dryRun, types, syncDeps) => unwrap(await ns().restore(selector, dryRun, types, syncDeps)),
+        setAuto: async (hours) => unwrap(await ns().setAuto(hours)),
+        githubStatus: async () => unwrap(await ns().githubStatus()),
+        githubSyncNow: async () => unwrap(await ns().githubSyncNow()),
+        githubPull: async () => unwrap(await ns().githubPull()),
+        removeEntry: async (selector) => unwrap(await ns().removeEntry(selector)),
+        setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
+        checkUpdate: async () => unwrap(await ns().checkUpdate()),
+        update: async () => unwrap(await ns().update()),
+      };
+      registerTab(scope, BackupTab, panel);
+    });
   });
 }
