@@ -185,6 +185,7 @@ async function main() {
       githubSyncNow: async () => ({ ok: true, value: samples['backupPanel/githubSyncNow'] }),
       githubPull: async () => ({ ok: true, value: samples['backupPanel/githubPull'] }),
       removeEntry: async () => ({ ok: true, value: samples['backupPanel/removeEntry'] }),
+      setGithubToken: async () => ({ ok: true, value: { ok: true, tokenSet: true, summary: '已保存' } }),
       checkUpdate: async () => ({ ok: true, value: samples['backupPanel/checkUpdate'] }),
       update: async () => ({ ok: true, value: samples['backupPanel/update'] }),
       setGithubRepo: async () => ({ ok: true, value: samples['backupPanel/setGithubRepo'] }),
@@ -209,6 +210,12 @@ async function main() {
     const Component = tab?.component ?? tab;
     const injected = tab.inject();
     ok(typeof injected.panel?.status === 'function' && typeof injected.panel?.restore === 'function' && typeof injected.panel?.githubSyncNow === 'function' && typeof injected.panel?.githubPull === 'function' && typeof injected.panel?.removeEntry === 'function' && typeof injected.panel?.setGithubRepo === 'function', '注入面提供 panel API（含 removeEntry/github）');
+    // #97 防复发：panel 面方法必须与贡献 descriptors 的 method 一一对应——
+    // 0.12.0 起宿主半有 setGithubToken 而客户端漏接，0.13.0 面板按钮才踩响。
+    const descriptorMethods = new Set(contribution.descriptors.map((d) => d.method));
+    const panelMethods = new Set(Object.keys(injected.panel));
+    const missing = [...descriptorMethods].filter((m) => !panelMethods.has(m));
+    ok(missing.length === 0, `panel 面与 descriptors 一一对应（缺: ${missing.join(',') || '无'}）`);
 
     const React = require('react');
     const { renderToStaticMarkup } = require('react-dom/server');
