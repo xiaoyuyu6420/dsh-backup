@@ -268,6 +268,7 @@ export function apply(ctx) {
         githubPull: async () => unwrap(await ns().githubPull()),
         removeEntry: async (selector) => unwrap(await ns().removeEntry(selector)),
         setGithubRepo: async (repo) => unwrap(await ns().setGithubRepo(repo)),
+        setGithubToken: async (token) => unwrap(await ns().setGithubToken(token)),
         checkUpdate: async () => unwrap(await ns().checkUpdate()),
         update: async () => unwrap(await ns().update()),
       };
