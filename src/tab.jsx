@@ -781,6 +781,14 @@ export function BackupTab({ panel, t }) {
             >
               {t('feedbackLink')}
             </a>
+            {' · '}
+            <a
+              href="https://github.com/xiaoyuyu6420/dsh-backup"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t('starLink')}
+            </a>
           </p>
         </>
       ) : null}

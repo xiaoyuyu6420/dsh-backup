@@ -311,8 +311,13 @@ async function main() {
     console.log('1) 手动备份');
     const r1 = await run('');
     ok(r1.kind === 'success', `/backup 成功: ${r1.kind === 'success' ? r1.text.split('\n')[0] : r1.text}`);
+    // 增长提示的骚扰边界：首次手动备份回执带一次 star 提示，第二次起永不再现
+    ok(r1.text.includes('给个 Star'), '首次手动备份回执含一次性 star 提示');
+    ok(await fs.readFile(`${root}/auto.json`, 'utf8').then((t) => JSON.parse(t).starHinted === true, () => false), 'starHinted 已持久化（重启不重复提示）');
+    const r1b = await run('');
+    ok(!r1b.text.includes('给个 Star'), '第二次备份回执不再出现 star 提示（一次性，不骚扰）');
     const archives1 = await listArchives(root);
-    ok(archives1.length === 1, `生成 1 份归档（实际 ${archives1.length}）`);
+    ok(archives1.length === 2, `生成 2 份归档（实际 ${archives1.length}）`);
     const first = archives1[0];
     ok(await fs.stat(`${root}/${first}.sha256`).then(() => true, () => false), '边车 .sha256 存在');
     const entries1 = await tarList(root, first);
