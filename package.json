@@ -1,6 +1,6 @@
 {
   "name": "@xiaoyuyu6420/dsh-backup",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "一键备份与恢复 DeepSeek Harness（dsh）的全部用户数据（~/.dsh）：定时自动备份、升级快照、会话日志体检修复、迁移预检、宿主起不来也能用的救援通道、凭据脱敏、GitHub 同步跨机迁移，附可视化面板。 One command to back up & restore all of ~/.dsh: /backup, scheduled auto-backup, upgrade snapshots, session doctor & repair, migrate precheck, out-of-process rescue console, credential redaction, GitHub sync.",
   "type": "module",
   "packageManager": "pnpm@11.24.0",
