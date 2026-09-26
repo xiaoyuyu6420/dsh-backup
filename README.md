@@ -5,6 +5,7 @@
 [![Downloads](https://img.shields.io/npm/dw/@xiaoyuyu6420/dsh-backup)](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup)
 [![Publish to npm](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml/badge.svg)](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/xiaoyuyu6420/dsh-backup?style=flat&color=f5c518)](https://github.com/xiaoyuyu6420/dsh-backup/stargazers)
 [![Listed on DSH Directory](https://dsh.directory/badges/listed.svg)](https://dsh.directory/plugins/xiaoyuyu6420/dsh-backup)
 
 [English](README.en.md) | 简体中文
@@ -165,6 +166,10 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 - [@beastrobin](https://github.com/beastrobin) —— #1 中对保留方法名的根因分析，直接促成 v0.5.1 修复
 - [@mlosun](https://github.com/mlosun) —— #2 中详尽的复现与根因报告
 - [@Choi-Peng](https://github.com/Choi-Peng) —— #5 中协助把受影响用户指引到修复版本
+
+## 支持这个项目
+
+如果 dsh-backup 帮到了你：⭐ [给个 Star](https://github.com/xiaoyuyu6420/dsh-backup) 是最直接的鼓励，也能让更多 DSH 用户找到它。遇到问题或有想法，欢迎到[反馈帖](https://github.com/xiaoyuyu6420/dsh-backup/discussions/32)留言。
 
 ## 许可证
 

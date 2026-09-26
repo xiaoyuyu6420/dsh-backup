@@ -5,6 +5,7 @@
 [![Downloads](https://img.shields.io/npm/dw/@xiaoyuyu6420/dsh-backup)](https://www.npmjs.com/package/@xiaoyuyu6420/dsh-backup)
 [![Publish to npm](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml/badge.svg)](https://github.com/xiaoyuyu6420/dsh-backup/actions/workflows/publish.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/xiaoyuyu6420/dsh-backup?style=flat&color=f5c518)](https://github.com/xiaoyuyu6420/dsh-backup/stargazers)
 [![Listed on DSH Directory](https://dsh.directory/badges/listed.svg)](https://dsh.directory/plugins/xiaoyuyu6420/dsh-backup)
 
 English | [简体中文](README.md)
@@ -163,6 +164,10 @@ Retention policy, credential redaction internals, GitHub sync, restore safeguard
 - [@beastrobin](https://github.com/beastrobin) — the reserved-method-name root cause analysis in #1 that directly led to the v0.5.1 fix
 - [@mlosun](https://github.com/mlosun) — the thorough reproduction and root cause report in #2
 - [@Choi-Peng](https://github.com/Choi-Peng) — triage help pointing affected users to the fix in #5
+
+## Support this project
+
+If dsh-backup has been useful: ⭐ [a star](https://github.com/xiaoyuyu6420/dsh-backup) is the simplest way to say thanks — and it helps other DSH users find it. Questions or ideas? Drop them in the [feedback thread](https://github.com/xiaoyuyu6420/dsh-backup/discussions/32).
 
 ## License
 
