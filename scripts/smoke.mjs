@@ -540,7 +540,7 @@ async function main() {
     const mock3 = makeCtx({ home, dsh });
     plugin(mock3.ctx, { destination: config.destination, githubRepo: ghBare.split(path.sep).join('/') });
     const rSync1 = await mock3.handler('');
-    ok(rSync1.kind === 'success' && rSync1.text.includes('备份完成'), '备份成功（githubRepo 已配置）');
+    ok(rSync1.kind === 'success' && rSync1.text.includes('备份完成'), `备份成功（githubRepo 已配置）: ${rSync1.kind === 'success' ? '' : rSync1.text.replace(/\n/g, ' ').slice(0, 200)}`);
     const syncDir2 = path.join(home, 'Desktop', 'dsh-backups', '.github-sync');
     ok(await fs.stat(path.join(syncDir2, '.git')).then(() => true, () => false), '同步工作树已初始化');
     const bareLog = await gitOut(['--git-dir', ghBare, 'log', '--oneline', '-1']);
@@ -548,7 +548,7 @@ async function main() {
     const bareFiles = await gitOut(['--git-dir', ghBare, 'ls-tree', '-r', '--name-only', 'HEAD']).then((s) => s.split('\n').filter(Boolean));
     ok(bareFiles.some((f) => f.endsWith('.tar.gz')) && bareFiles.some((f) => f.endsWith('.sha256')), `归档与边车已推送（${bareFiles.length} 个文件）`);
     ok(!bareFiles.includes('.git-credentials'), '凭据文件未被推送');
-    ok(await fs.readFile(path.join(syncDir2, '.gitignore'), 'utf8').then((t) => t.includes('.git-credentials')), '.gitignore 排除凭据文件');
+    ok(await fs.readFile(path.join(syncDir2, '.gitignore'), 'utf8').then((t) => t.includes('.git-credentials'), () => false), '.gitignore 排除凭据文件');
     await fs.writeFile(path.join(syncDir2, 'junk-file.txt'), 'junk');
     await mock3.handler('github sync');
     ok(await fs.stat(path.join(syncDir2, 'junk-file.txt')).then(() => false, () => true), '工作树杂物被镜像清理');
@@ -570,11 +570,11 @@ async function main() {
     const mockCred = makeCtx({ home, dsh, env: { DSH_BACKUP_GITHUB_TOKEN: 'test-token' } });
     plugin(mockCred.ctx, { destination: config.destination, githubRepo: ghBare.split(path.sep).join('/') });
     const rCred = await mockCred.handler('');
-    ok(rCred.kind === 'success', '带 token 的备份成功（https 远端检查通过）');
+    ok(rCred.kind === 'success', `带 token 的备份成功（https 远端检查通过）: ${rCred.kind === 'success' ? '' : rCred.text.replace(/\n/g, ' ').slice(0, 200)}`);
     const credsPath = `${root}/.github-sync/.git-credentials`;
     ok(await fs.readFile(credsPath, 'utf8').then((t) => t.includes('test-token'), () => false), '.git-credentials 存在且含 test-token');
     if (!IS_WIN) {
-      const credMode = (await fs.stat(credsPath)).mode & 0o777;
+      const credMode = (await fs.stat(credsPath).catch(() => ({ mode: 0 }))).mode & 0o777;
       ok(credMode === 0o600, `.git-credentials 权限 0600（实际 ${credMode.toString(8)}）`);
     }
     await fs.writeFile(`${root}/.github-sync/junk-cred-test.txt`, 'junk');
