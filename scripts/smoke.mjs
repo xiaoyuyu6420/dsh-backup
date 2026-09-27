@@ -13,7 +13,7 @@
  * 用法：node scripts/smoke.mjs
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -72,7 +72,7 @@ function assertPanelMethodAvailable(namespace, method) {
 }
 
 // ---------- DSH 服务桩 ----------
-function makeCtx({ home, dsh, env, fake }) {
+function makeCtx({ home, dsh, env, fake, missing }) {
   const intervals = [];
   const timeouts = [];
   const handlers = new Map();
@@ -82,6 +82,8 @@ function makeCtx({ home, dsh, env, fake }) {
   let tool = null;
 
   async function resolveExecutable(name) {
+    // missing：模拟该外部命令不存在（Windows 无 sha256sum/shasum 的场景）
+    if (missing && missing.includes(name)) throw new Error(`mock: ${name} not found`);
     // fake：场景注入的假外部命令（如 dsh CLI），优先于真实 PATH
     if (fake && fake[name]) return `__fake__:${name}`;
     if (IS_WIN) {
@@ -196,6 +198,20 @@ function makeCtx({ home, dsh, env, fake }) {
     },
   };
   return { ctx, intervals, timeouts, typertContribs, services, routes, handler: (raw, signal) => handlers.get('backup')({ rawInput: raw, signal }), tool: () => tool };
+}
+
+/** 启动宽限（AUTO_BOOT_GRACE_MS）：启动期的重活被有意推迟到 boot 窗口之外。
+ * 场景里"重启"= 再 plugin(ctx) 一次，再手动触发这个延迟任务，等价于宿主熬过
+ * 45 秒把重活放行（#103 后列车快照与自动补跑都走这条路）。 */
+const BOOT_GRACE_MS = 45_000;
+async function fireBootGrace(mock, waitMs = 5000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < waitMs) {
+    const job = mock.timeouts.find((t) => t.ms === BOOT_GRACE_MS);
+    if (job) { await job.fn(); return true; }
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
 }
 
 async function listArchives(root) {
@@ -1117,7 +1133,9 @@ async function main() {
         }
         ok(auto1 && typeof auto1.lastTrain === 'string' && auto1.lastTrain, `auto.json 已记录宿主列车: ${JSON.stringify(auto1)}`);
         await fs.writeFile(autoPath, JSON.stringify({ ...auto1, lastTrain: '0.0.1-test-old' }));
-        plugin(makeCtx({ home: env24.home, dsh: env24.dsh }).ctx, {});
+        const mock24b = makeCtx({ home: env24.home, dsh: env24.dsh });
+        plugin(mock24b.ctx, {});
+        await fireBootGrace(mock24b); // 升级前快照被推迟到 boot 窗口之外（#103）
         let preUpgrade = [];
         for (let i = 0; i < 40 && !(preUpgrade = (await fs.readdir(env24.root)).filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz'))).length; i += 1) {
           await new Promise((rr) => setTimeout(rr, 250));
@@ -1142,7 +1160,9 @@ async function main() {
           for (const fake of ['0.0.2-test-old', '0.0.3-test-old']) {
             const aObj = JSON.parse(await fs.readFile(autoPath, 'utf8'));
             await fs.writeFile(autoPath, JSON.stringify({ ...aObj, lastTrain: fake }));
-            plugin(makeCtx({ home: env24.home, dsh: env24.dsh }).ctx, {});
+            const mock24x = makeCtx({ home: env24.home, dsh: env24.dsh });
+            plugin(mock24x.ctx, {});
+            await fireBootGrace(mock24x);
             for (let i = 0; i < 40; i += 1) {
               await new Promise((rr) => setTimeout(rr, 250));
               try {
@@ -1553,6 +1573,122 @@ async function main() {
       } finally {
         globalThis.fetch = realFetch;
         await fs.rm(env29.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('30) #103 启动重活断路：流式 sha256 + 启动宽限 + 尝试锚点冷却');
+    {
+      const env30 = await mkTmpHome();
+      try {
+        // ---- A. Windows 无 sha256sum/shasum → 流式哈希回退必须成功且值正确 ----
+        const mockA = makeCtx({ home: env30.home, dsh: env30.dsh, missing: ['sha256sum', 'shasum'] });
+        plugin(mockA.ctx, {});
+        const rA = await mockA.handler('');
+        ok(rA.kind === 'success', `无 sha256sum/shasum 时备份成功（回退路径）: ${String(rA.text).split('\n')[1] ?? ''}`);
+        const [nameA] = await listArchives(env30.root);
+        const sideA = nameA ? (await fs.readFile(`${env30.root}/${nameA}.sha256`, 'utf8')).trim().split(/\s+/)[0] : '';
+        const realA = nameA ? createHash('sha256').update(await fs.readFile(`${env30.root}/${nameA}`)).digest('hex') : '';
+        ok(!!sideA && sideA === realA, '回退产出的 sha256 与独立重算一致');
+        const src30 = await fs.readFile(new URL('../lib/index.js', import.meta.url), 'utf8');
+        ok(!src30.includes('MB 回退上限') && /createReadStream\(absPath/.test(src30), 'sha256 回退已改流式（无体积上限、不整包读入）');
+
+        // ---- B. >256MB 归档：旧实现在此直接抛「超过 256MB 回退上限」（#103 的起点）----
+        const bigDir = path.join(env30.dsh, 'data');
+        await fs.mkdir(bigDir, { recursive: true });
+        const chunk = randomBytes(8 * 1024 * 1024); // 高熵分块：gzip 压不动，归档确实 >256MB
+        const fh = await fs.open(path.join(bigDir, 'big-blob.bin'), 'w');
+        try {
+          for (let i = 0; i < 34; i += 1) await fh.write(chunk);
+        } finally {
+          await fh.close();
+        }
+        const mockB = makeCtx({ home: env30.home, dsh: env30.dsh, missing: ['sha256sum', 'shasum'] });
+        plugin(mockB.ctx, {});
+        const rB = await mockB.handler('');
+        ok(rB.kind === 'success', `>256MB 归档备份成功（旧实现抛上限错误）: ${String(rB.text).split('\n')[1] ?? ''}`);
+        const [nameB] = await listArchives(env30.root);
+        const sizeB = nameB ? (await fs.stat(`${env30.root}/${nameB}`)).size : 0;
+        const sideB = nameB ? (await fs.readFile(`${env30.root}/${nameB}.sha256`, 'utf8')).trim().split(/\s+/)[0] : '';
+        ok(sizeB > 256 * 1024 * 1024 && /^[0-9a-f]{64}$/.test(sideB), `归档 ${Math.round(sizeB / 1048576)}MB 也拿到了校验和`);
+      } finally {
+        await fs.rm(env30.dir, { recursive: true, force: true });
+      }
+
+      // ---- C/D/E：调度断路（磁盘锚点 / 启动宽限 / 失败冷却）----
+      const seedEnv = await mkTmpHome();
+      let seedTrain;
+      try {
+        const mockSeed = makeCtx({ home: seedEnv.home, dsh: seedEnv.dsh });
+        plugin(mockSeed.ctx, {});
+        await new Promise((r) => setTimeout(r, 300));
+        try {
+          seedTrain = JSON.parse(await fs.readFile(`${seedEnv.root}/auto.json`, 'utf8')).lastTrain;
+        } catch { /* 未落盘：下面省略 lastTrain */ }
+      } finally {
+        await fs.rm(seedEnv.dir, { recursive: true, force: true });
+      }
+      const stale30 = new Date(Date.now() - 3 * 86400 * 1000).toISOString();
+      const craftAuto = (extra = {}) => JSON.stringify({ hours: 2, lastAutoAt: stale30, github: {}, ...(seedTrain ? { lastTrain: seedTrain } : {}), ...extra });
+
+      // C. 磁盘上躺着新鲜归档 → 不被过期的 lastAutoAt 拖去立刻重跑（#103 第二道断路）
+      const envC = await mkTmpHome();
+      try {
+        await fs.mkdir(envC.root, { recursive: true });
+        await fs.writeFile(`${envC.root}/dsh-20260101-000000000.tar.gz`, 'stub');
+        await fs.writeFile(`${envC.root}/auto.json`, craftAuto());
+        const mockC = makeCtx({ home: envC.home, dsh: envC.dsh });
+        plugin(mockC.ctx, {});
+        await new Promise((r) => setTimeout(r, 300));
+        const jobC = mockC.timeouts.filter((t) => t.ms > 1000).pop();
+        ok(jobC && jobC.ms > 90 * 60_000, `最新归档成为调度锚点，下次排在 ${Math.round((jobC?.ms ?? 0) / 60000)} 分钟后（非立即）`);
+      } finally {
+        await fs.rm(envC.dir, { recursive: true, force: true });
+      }
+
+      // D. 无锚点可依（归档被删/首启）→ 补跑落在启动宽限之后，且不存在 ms≤1s 的启动期调度
+      const envD = await mkTmpHome();
+      try {
+        await fs.mkdir(envD.root, { recursive: true });
+        await fs.writeFile(`${envD.root}/auto.json`, craftAuto());
+        const mockD = makeCtx({ home: envD.home, dsh: envD.dsh });
+        plugin(mockD.ctx, {});
+        await new Promise((r) => setTimeout(r, 300));
+        ok(mockD.timeouts.some((t) => t.ms === BOOT_GRACE_MS), `补跑被推到启动宽限（实际 ${mockD.timeouts.map((t) => t.ms).join(',')}）`);
+        ok(!mockD.timeouts.some((t) => t.ms <= 1000), '不存在 ms≤1s 的启动期调度（旧版 #103 的即时重跑形态）');
+        const graceD = mockD.timeouts.find((t) => t.ms === BOOT_GRACE_MS);
+        await graceD.fn();
+        const afterD = JSON.parse(await fs.readFile(`${envD.root}/auto.json`, 'utf8'));
+        ok(typeof afterD.lastAutoAt === 'string' && Date.now() - Date.parse(afterD.lastAutoAt) < 60_000, '宽限放行后补跑完成并推进锚点');
+        ok(typeof afterD.lastAutoAttemptAt === 'string' && afterD.lastAutoError === null, '起跑留痕落盘、成功即清失败原因');
+        const nextD = mockD.timeouts.filter((t) => t.ms !== BOOT_GRACE_MS).pop();
+        ok(nextD && nextD.ms > 90 * 60_000, `成功后按周期续排（${Math.round((nextD?.ms ?? 0) / 60000)} 分钟后）`);
+      } finally {
+        await fs.rm(envD.dir, { recursive: true, force: true });
+      }
+
+      // E. 备份失败（tar 缺失）→ 失败可见 + 跨重启冷却，不再「每次启动重跑」
+      const envE = await mkTmpHome();
+      try {
+        await fs.mkdir(envE.root, { recursive: true });
+        await fs.writeFile(`${envE.root}/auto.json`, craftAuto());
+        const mockE = makeCtx({ home: envE.home, dsh: envE.dsh, missing: ['tar'] });
+        plugin(mockE.ctx, {});
+        await new Promise((r) => setTimeout(r, 300));
+        await mockE.timeouts.find((t) => t.ms === BOOT_GRACE_MS).fn();
+        const afterE = JSON.parse(await fs.readFile(`${envE.root}/auto.json`, 'utf8'));
+        ok(typeof afterE.lastAutoAttemptAt === 'string', '失败也留下起跑锚点（跨重启断路的前提）');
+        ok(afterE.lastAutoError && typeof afterE.lastAutoError.message === 'string', `失败原因已落盘: ${String(afterE.lastAutoError?.message).slice(0, 60)}`);
+        const stE = await mockE.handler('auto status');
+        ok(stE.kind === 'success' && stE.text.includes('上次自动备份未完成'), 'auto status 暴露上次失败（不再静默）');
+        // 「重启」：新实例读得到尝试锚点 → 重活不得立刻重跑（旧版正是死在这里）
+        const mockE2 = makeCtx({ home: envE.home, dsh: envE.dsh, missing: ['tar'] });
+        plugin(mockE2.ctx, {});
+        await new Promise((r) => setTimeout(r, 300));
+        const jobE2 = mockE2.timeouts.filter((t) => t.ms > 1000).pop();
+        ok(jobE2 && jobE2.ms >= 25 * 60_000, `上次尝试后冷却生效（重启后仍等 ${Math.round((jobE2?.ms ?? 0) / 60000)} 分钟）`);
+        ok(!mockE2.timeouts.some((t) => t.ms <= 1000), '重启后无 ms≤1s 调度（#103 死循环已断）');
+      } finally {
+        await fs.rm(envE.dir, { recursive: true, force: true });
       }
     }
 
