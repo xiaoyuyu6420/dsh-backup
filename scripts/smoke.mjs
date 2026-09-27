@@ -762,6 +762,16 @@ async function main() {
         ok(!list16.some((e) => e.includes('.credentials.yaml')), '归档不含 .credentials.yaml（脱敏生效）');
         const vaultFile = `${env16.root}/vault/.credentials.yaml`;
         ok(await fs.readFile(vaultFile, 'utf8').then((t) => t === 'api-key: secret', () => false), 'vault 保存明文凭据');
+        // 凭据存底（启动钩子写的 vault/preserved/）必须活过后续的备份刷新——它是
+        // "升级后想回退"的后路。旧实现整目录 rm -rf 会连它一起删，且与刷新抢跑时
+        // 在 Linux 上直接 ENOTEMPTY 让整个备份失败（CI 稳定复现）。
+        const presFiles = () => fs.readdir(`${env16.root}/vault/preserved`).catch(() => []);
+        let pres16 = [];
+        for (let i = 0; i < 40 && !(pres16 = await presFiles()).length; i += 1) await new Promise((r) => setTimeout(r, 50));
+        ok(pres16.length === 1, `凭据哨兵已存底 vault/preserved（${pres16.length} 份）`);
+        await mock16.handler('');
+        ok((await presFiles()).length === 1, '备份刷新后凭据哨兵仍在（vault 刷新不整目录删除）');
+        ok(await fs.readFile(vaultFile, 'utf8').then((t) => t === 'api-key: secret', () => false), '刷新后 vault 镜像仍是最新明文');
         const redacted16 = JSON.parse(await fs.readFile(`${env16.root}/${arch16}.redacted.json`, 'utf8'));
         ok(Array.isArray(redacted16.files) && redacted16.files.includes('.credentials.yaml'), '.redacted.json 边车记录脱敏清单');
         const meta16 = JSON.parse(await fs.readFile(`${env16.root}/${arch16}.meta.json`, 'utf8'));
