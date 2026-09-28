@@ -72,7 +72,7 @@ function assertPanelMethodAvailable(namespace, method) {
 }
 
 // ---------- DSH 服务桩 ----------
-function makeCtx({ home, dsh, env, fake, missing }) {
+function makeCtx({ home, dsh, env, fake, missing, settingsMode }) {
   const intervals = [];
   const timeouts = [];
   const handlers = new Map();
@@ -184,14 +184,29 @@ function makeCtx({ home, dsh, env, fake, missing }) {
         // 模拟真实 settings 服务的合并语义：register 收到的 base 即
         // resolveBase(pluginConfig)，describe.value 返回合并结果——否则
         // value:{} 会遮蔽 pluginConfig（githubRepo/keep 等全部丢失）
+        //
+        // settingsMode 复刻两代宿主模型：
+        //  legacy（默认）：≤0.1.6，有 register，describe 含插件自注册的 ns；
+        //  new   ：≥0.1.7，无 register，descriptor 由条目 Config 派生（值同 base）；
+        //  empty ：≥0.1.7 且宿主没能派生我们的条目（无 register、describe 为空）
+        //          ——路由必须显式降级，而不是抛 TypeError。
         let registeredBase = {};
+        const mode = settingsMode || 'legacy';
+        const base = {
+          update: () => {},
+          replace: () => {},
+        };
         const scope = {
-          settings: {
-            register: (_ns, _schema, opts) => { registeredBase = (opts && opts.base) || {}; },
-            update: () => {},
-            replace: () => {},
-            describe: () => [{ ns: 'dsh-backup', revision: 0, value: { ...registeredBase } }],
-          },
+          settings: mode === 'legacy'
+            ? {
+              ...base,
+              register: (_ns, _schema, opts) => { registeredBase = (opts && opts.base) || {}; },
+              describe: () => [{ ns: 'dsh-backup', revision: 0, value: { ...registeredBase } }],
+            }
+            : {
+              ...base,
+              describe: () => (mode === 'new' ? [{ ns: 'dsh-backup', revision: 0, value: { ...registeredBase } }] : []),
+            },
         };
         callback(scope);
       }
@@ -212,6 +227,19 @@ async function fireBootGrace(mock, waitMs = 5000) {
     await new Promise((r) => setTimeout(r, 25));
   }
   return false;
+}
+
+/** 临时目录清理：插件的启动钩子（凭据存底写 vault）可能与 rm 抢跑 → ENOTEMPTY，
+ * 重试几次；清不掉也不该让整套用例失败。 */
+async function rmTemp(dir) {
+  for (let i = 0; i < 6; i += 1) {
+    try {
+      await fs.rm(dir, { recursive: true, force: true });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
 }
 
 async function listArchives(root) {
@@ -1699,6 +1727,74 @@ async function main() {
         ok(!mockE2.timeouts.some((t) => t.ms <= 1000), '重启后无 ms≤1s 调度（#103 死循环已断）');
       } finally {
         await fs.rm(envE.dir, { recursive: true, force: true });
+      }
+    }
+
+    console.log('31) 设置 seam 两代模型（0.1.7+ 的 Config/volatile 与显式降级）');
+    {
+      // A. 导出 Config：0.1.7+ 宿主从条目的 Config schema 派生设置表单，
+      //    且只认标了 volatile 的字段（宿主 dsh-settings 的 volatileForm）。
+      const mod = await import(new URL('../lib/index.js', import.meta.url).href);
+      ok(mod.Config && typeof mod.Config.toJSON === 'function', '导出 Config 且可 toJSON（宿主取 schema 的判据）');
+      const dict = mod.Config?.dict ?? {};
+      ok(['destination', 'keep', 'exclude', 'redact', 'githubRepo', 'updateCheck'].every((k) => k in dict), `Config 覆盖全部设置字段: ${Object.keys(dict).join(', ')}`);
+      const volatileCount = Object.values(dict).filter((f) => f?.meta?.volatile === true).length;
+      // 本地 schemastery 3.18.1 无 .volatile()（老载体），宿主 3.18.4 有——
+      // 有则必须全标（否则设置表单里字段会整体消失），无则原样返回不报错。
+      ok(volatileCount === 0 || volatileCount === 6, `volatile 标注一致（本机 schemastery 支持时 ${volatileCount}/6）`);
+
+      // B. 新宿主模型（无 register，descriptor 由条目派生）→ 设置路由照常工作
+      const envNew = await mkTmpHome();
+      try {
+        const mockNew = makeCtx({ home: envNew.home, dsh: envNew.dsh, settingsMode: 'new' });
+        plugin(mockNew.ctx, { destination: '~/Desktop/newhost-bk' });
+        const route = mockNew.routes.find((r) => r.path === '/dsh-backup/settings');
+        const mkRes = () => ({
+          status: 200, headers: null, done: false, body: null,
+          writeHead(s, h) { this.status = s; this.headers = h; },
+          write(c) { this.body = Buffer.concat([this.body ?? Buffer.alloc(0), Buffer.from(c)]); return true; },
+          end(b) { if (b !== undefined) this.body = Buffer.concat([this.body ?? Buffer.alloc(0), Buffer.from(b)]); this.done = true; },
+        });
+        const resNew = mkRes();
+        await route.handler({ method: 'GET', url: '/dsh-backup/settings', headers: { host: '127.0.0.1:3081' } }, resNew);
+        const gotNew = JSON.parse(resNew.body.toString('utf8'));
+        ok(resNew.status === 200 && gotNew.unavailable === undefined && typeof gotNew.revision === 'number', `新模型下设置路由可用（无 register 也返回描述符；值由宿主从条目 Config 派生）: ${JSON.stringify(gotNew).slice(0, 90)}`);
+      } finally {
+        await rmTemp(envNew.dir);
+      }
+
+      // C. 宿主没能派生我们的条目（describe 为空）→ 显式降级，不再抛 TypeError
+      const envEmpty = await mkTmpHome();
+      try {
+        const mockEmpty = makeCtx({ home: envEmpty.home, dsh: envEmpty.dsh, settingsMode: 'empty' });
+        plugin(mockEmpty.ctx, { destination: '~/Desktop/empty-bk' });
+        const route = mockEmpty.routes.find((r) => r.path === '/dsh-backup/settings');
+        const mkRes = () => ({
+          status: 200, headers: null, done: false, body: null,
+          writeHead(s, h) { this.status = s; this.headers = h; },
+          write(c) { this.body = Buffer.concat([this.body ?? Buffer.alloc(0), Buffer.from(c)]); return true; },
+          end(b) { if (b !== undefined) this.body = Buffer.concat([this.body ?? Buffer.alloc(0), Buffer.from(b)]); this.done = true; },
+        });
+        const resEmpty = mkRes();
+        await route.handler({ method: 'GET', url: '/dsh-backup/settings', headers: { host: '127.0.0.1:3081' } }, resEmpty);
+        const gotEmpty = JSON.parse(resEmpty.body.toString('utf8'));
+        ok(resEmpty.status === 200 && gotEmpty.unavailable === true && typeof gotEmpty.note === 'string', `命名空间缺失时显式降级（200 + unavailable）: ${(gotEmpty.note || '').slice(0, 40)}…`);
+        ok(!/reading 'value'/.test(JSON.stringify(gotEmpty)), '降级响应不含原始 TypeError 文案');
+        const rq = () => {
+          const handlers = {};
+          const req = {
+            method: 'POST', url: '/dsh-backup/settings', headers: { host: '127.0.0.1:3081' },
+            on(ev, cb) { handlers[ev] = cb; return req; }, once() { return req; }, destroy() {},
+          };
+          setTimeout(() => { handlers.data?.(Buffer.from('{"keep":5}')); handlers.end?.(); }, 0);
+          return req;
+        };
+        const resPost = mkRes();
+        await route.handler(rq(), resPost);
+        const gotPost = JSON.parse(resPost.body.toString('utf8'));
+        ok(resPost.status === 200 && gotPost.unavailable === true, `降级态下保存请求给出明确说明而非崩溃: HTTP ${resPost.status}`);
+      } finally {
+        await rmTemp(envEmpty.dir);
       }
     }
 

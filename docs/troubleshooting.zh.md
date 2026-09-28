@@ -42,6 +42,35 @@
 
 **临时自救（升级前）**：`/backup auto off` 关掉定时备份即可（关掉后启动路径不再有重活）；彻底一点就在 `cordis.patch.yml` 里把本插件 `disabled: true`。已产生的孤儿归档可以手动删除（它们内容完整但没有校验和，`/backup verify` 会提示缺少边车）。
 
+## 升到 DSH 0.2.0 后装不上本插件：`installation rejected: ... is incompatible with dsh 0.2.0-rc.1`
+
+**原因**：0.2.0 起宿主新增**安装期兼容闸门**——声明了 peerDependencies 的插件，若 peer 范围不覆盖当前宿主版本，`dsh plugin add/update` 会直接拒绝安装（不再只是警告）。
+
+**处理**：升级到 **0.13.2+**（peers/engines 已包含 `^0.2.0-rc.1`）。若你暂时不能升级，可按宿主的提示手动豁免（仅限你确认过风险时）：
+
+```sh
+dsh plugin --profile web allow-version @xiaoyuyu6420/dsh-backup@<版本> --dsh-version 0.2.0-rc.1 --accept-risk
+```
+
+## 设置卡片打不开 / 改了不生效（宿主 0.1.7 及以上）
+
+**症状**：设置 → 插件 → 备份里的「设置」卡片读不出当前配置（或浏览器控制台可见 `/dsh-backup/settings` 返回 400 `Cannot read properties of undefined (reading 'value')`）；改了值保存后重启又回默认。
+
+**原因**：宿主 **0.1.7 起换了设置模型**——`ctx.settings.register(ns, schema)` 被移除，改由「插件条目的 Config schema」派生表单，且只有标了 `volatile` 的字段会进表单。0.13.1 及更早没有导出 `Config`，于是本插件的设置项在宿主侧**静默不存在**（0.1.6 及更早仍是旧模型，不受影响）。
+
+**处理**：升级到 **0.13.2+**（导出 `Config` + 逐字段 volatile 标注；设置的用户层改由宿主写入 profile 覆盖文件，跨重启生效）。
+
+**临时绕行（升级前）**：把选项写在 profile 配置里，功能完全等价：
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml
+- id: dsh-backup
+  name: "@xiaoyuyu6420/dsh-backup"
+  config:
+    destination: ~/Desktop/dsh-backups
+    keep: 7
+```
+
 ## 设置里找不到「备份」面板（宿主 0.1.6 及以上）
 
 **症状**：设置 → 插件（内置插件）里只有「插件列表」，没有「备份」标签页；浏览器控制台有 `strict codec has no create() factory`。命令行与定时备份不受影响。

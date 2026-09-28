@@ -25,6 +25,7 @@ e2e 脚本的断言清单见 `scripts/e2e-host.mjs` 头注释；其中 **HTML �
 | 0.11.3（2026-09-12 已发 npm） | 0.1.5-rc.1 / rc.2 | ✅ 本地全量验收绿（2026-09-12） | peers 追加 `^0.1.5-rc.1`（semver 同元组规则覆盖 rc.2）。rc.2 适配面实测为零：六个 node 侧 peer 包 rc.1↔rc.2 **逐字节相同**（tarball diff，导出面零增删），client 包列车未动（dsh-client-runtime 最新仍为 0.1.1-rc.2）。rc.2 真机 e2e 32/32；跨列车原地升级 e2e（rc.1 宿主 + 0.11.2 → rc.2 宿主 + 0.11.3）14/14，设置与归档无损 |
 | 0.12.0（2026-09-12 已发 npm） | ✅ 本地全量验收绿（2026-09-12：smoke 256 + e2e-host 34 + 跨列车升级 14） | 新增迁移预检（拒绝规则校准自宿主 0.1.5-rc.2 的冻结清单：v0 51 类 / v2 51 类 / 来源 kind 15 类）与凭据哨兵；peers 不变，声明 `engines.dsh` |
 | 0.13.0（2026-09-21 已发 npm，**当前 latest**） | 0.1.5-rc.1 / rc.2 | ✅ 本地全量验收绿：smoke 283 + e2e-host 37 + settings 47 + client 25 | 更新感知（`/backup check-update` + 面板卡）与一键更新（`/backup update`，更新前自动留升级前快照）；peers 不变 |
+| 0.13.2+（main，未发版） | 0.1.5-rc.2 / 0.1.7-rc.2 / **0.2.0-rc.1** | ✅ **真机实测通过（2026-09-29）** | 适配 0.2.0 列车：① peers/engines 追加 `^0.2.0-rc.1`——**0.2.0 起宿主新增安装期兼容闸门**，peer 不匹配会直接拒绝安装（实测报 `installation rejected: ... is incompatible with dsh 0.2.0-rc.1`，用户只能靠 `dsh plugin allow-version` 手动豁免）；② **修复 0.1.7 起失效的设置表单**：宿主在 0.1.7 移除了 `ctx.settings.register(ns, schema)`，改为从「条目的 Config schema」派生表单且**只认标了 `volatile` 的字段**（宿主 `volatileForm` 仅当 `meta.volatile` 存在才纳入）。本插件导出 `Config` 并逐字段 `.volatile()`（运行时探测：老 schemastery 无此方法则原样返回），0.1.7/0.2.0 上设置卡片从「400 报错」恢复为可读可写、用户层写入 profile 覆盖文件并跨重启生效；③ 命名空间万一仍缺失时显式降级（200 + `unavailable` + 说明），不再抛原始 TypeError。验证：smoke 312、settings 47、client 29；真宿主 e2e 0.1.7-rc.2 **37/37**、0.2.0-rc.1 **37/37**（设置 seam 全程真跑）；0.1.5-rc.2 老模型回归：设置 GET/POST 正常 |
 | 0.13.1+（main，未发版） | 0.1.6-alpha.1 / 0.1.7-alpha.1（含 **0.1.7-rc.1**） | ✅ **真机实测通过（2026-09-23，#94 修复；0.1.7-rc.1 于 09-24 补测）** | 修 0.1.6+ 面板标签静默消失（#94）：① strict codec 补 `create()` 惰性工厂（0.1.6 起强制，缺失时 `$mount` 抛 "strict codec has no create() factory"）；② `$mount` 改为声明式等待 `remote` 服务就绪；③ 挂载失败注册可见降级标签页。peers 追加 `^0.1.6-alpha.1 \|\| ^0.1.7-alpha.1`。验证：0.1.6-alpha.2 / 0.1.7-alpha.2 / **0.1.7-rc.1** 隔离环境实机（Built-in plugins 标签页出现、面板各卡片可用）。`^0.1.7-alpha.1` 语义覆盖同元组 rc.1，peer 无需再改 |
 
 ## 归档格式兼容（插件自身）
@@ -37,7 +38,10 @@ e2e 脚本的断言清单见 `scripts/e2e-host.mjs` 头注释；其中 **HTML �
 2. **客户端列车陷阱**：插件 web 面板依赖宿主 HTML 预加载 `/plugins/<pkg>/client.js`。0.1.1-rc+ 的 webserver 才生成预加载；旧列车上 node 侧一切正常但浏览器报 `client-modules: HTML did not preload @deepseek-ai/dsh-client-modules/client.js`。peerDependencies 表达不了这个约束——e2e 判据 #3 的 HTML 断言就是它的回归防线。
 3. **pnpm 默认 24h 冷却期**：pnpm 10 在 CI 默认启用 `minimumReleaseAge`（供应链保护），新列车发布后 24h 内日常 CI 装 peers 会红。这是**有意保留的防线**：等满即可，不要在日常 CI 加豁免。compat 巡检 job 因职责是追新，显式豁免。
 4. **strict codec 必须带 `create()`（0.1.6 起）**：客户端 Remote 贡献的 strict codec 在 0.1.5 只校验 `schema` 字段，0.1.6 起强制要求惰性工厂 `create()`（缺失时 `$mount` 抛 `strict codec has no create() factory`，且失败是静默的——面板标签直接消失，见 #94）。本仓库 `src/client.js` 的 `strictCodec()` helper 同时提供 `schema`（0.1.5 读）与 `create: () => schema`（0.1.6 读），两代共用同一 zod 实例。
-5. **客户端模块依赖图结算（0.1.6 起）**：插件 client 半在 apply 时不能假设 `ctx.remote` 已就绪——须 `ctx.inject(['remote'], …)` 声明式等待后再 `$mount`；挂载失败必须落可见降级（本仓库用 `BackupTabFallback`），否则用户只看到"设置里没有这一项"。`window.__ModuleLoader__.load({id, factory})` 经典脚本体两代通用，不要改成 closure 返回形态（0.1.5 的 script 标签语义下顶层 `return` 是语法错误）。
+6. **设置表单模型换了（0.1.7 起）**：`ctx.settings.register(ns, schema)` 被移除，宿主改从「插件条目的 Config schema」派生设置表单，且**只有标了 `volatile` 的字段会出现在表单里**（`dsh-settings` 的 `volatileForm` 只认 `meta.volatile`，非对象字段尤其如此）。插件必须 `export const Config`（Schemastery，需带 `toJSON`）并给可运行时修改的字段加 `.volatile()`。漏了不会报错——设置项在宿主里**静默消失**：插件自注册的命名空间不在 `describe()` 里，读设置会读到 `undefined`（旧实现直接抛 `Cannot read properties of undefined (reading 'value')`），写设置静默失败。本仓库的回归防线：smoke 场景 31（Config/volatile 形状 + 显式降级）与 e2e 的 settings seam 断言（真跑而非跳过）。
+   衍生坑：`.volatile()` 是 `@deepseek-ai/schemastery` **3.18.4** 才有的方法（3.18.1 没有）——插件代码要用运行时探测（本仓库 `volatileField`）兜住老载体，否则老宿主上装载期就崩。
+   另一处随列车变化：设置的用户层落点。≤0.1.6 写 `$DSH_HOME/settings.yaml`；0.1.7 起由宿主写 profile 覆盖文件（`profiles/<name>/cordis.patch.yml` 的条目 `config`）。断言/文档别写死其中一个。
+
 
 ## 升列车 SOP
 

@@ -35,6 +35,21 @@ let authCookie = '';
 const CK = () => (authCookie ? { Cookie: authCookie } : {});
 const req = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), ...CK() } });
 
+/** 读取设置的用户层落点：≤0.1.6 在 settings.yaml，0.1.7+ 在 profile 覆盖文件。 */
+function readUserLayer() {
+  const candidates = [
+    path.join(home, 'settings.yaml'),
+    path.join(home, 'profiles', 'web', 'cordis.patch.yml'),
+  ];
+  for (const p of candidates) {
+    try {
+      const text = fs.readFileSync(p, 'utf8');
+      if (text.includes('dsh-backup')) return { file: p, text };
+    } catch { /* 尚未创建 */ }
+  }
+  return { file: '(none)', text: candidates.map((p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } }).join('\n') };
+}
+
 const results = [];
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
@@ -235,9 +250,10 @@ async function main() {
     const invalidBody = await invalid.json();
     check('非法 keep 返回 400 invalid-field', invalid.status === 400 && Array.isArray(invalidBody.fields) && invalidBody.fields.includes('keep'));
 
-    const yamlPath = path.join(home, 'settings.yaml');
-    const yamlAfterSave = fs.existsSync(yamlPath) ? fs.readFileSync(yamlPath, 'utf8') : '';
-    check('保存后 settings.yaml 落盘用户层', yamlAfterSave.includes('dsh-backup:') && yamlAfterSave.includes('keep: 5'));
+    // 用户层落点随宿主列车不同：≤0.1.6 写 settings.yaml，0.1.7 起由宿主写
+    // profile 覆盖文件（cordis.patch.yml）。两处都认，并报出实际落点。
+    const userLayer = readUserLayer();
+    check('保存后用户层落盘（settings.yaml 或 profile patch）', /keep:\s*5/.test(userLayer.text), `user layer = ${userLayer.file}`);
 
     // 重启验证持久化
     await stopBoot();
@@ -252,8 +268,7 @@ async function main() {
       body: JSON.stringify({ reset: true, revision: persisted.revision }),
     }).then((r) => r.json());
     check('reset 清空用户层回退默认值', reset.hasOverrides === false && reset.keep !== 5);
-    const yamlAfterReset = fs.existsSync(yamlPath) ? fs.readFileSync(yamlPath, 'utf8') : '';
-    check('reset 后 settings.yaml 用户层清空', /dsh-backup:\s*\{\}|dsh-backup:\s*$/.test(yamlAfterReset.trim().split('\n').find((l) => l.startsWith('dsh-backup')) ?? '') || !yamlAfterReset.includes('keep: 5'));
+    check('reset 后用户层清空', !/keep:\s*5/.test(readUserLayer().text));
   }
 
   // ---------- doctor：体检/定点修复 RPC 往返 + 老归档静默降级 ----------
@@ -430,7 +445,9 @@ async function main() {
     let snapName = null;
     // 快照落在"生效备份目录"——seam 块的 reset 会把 destination 打回默认，
     // 两个候选目录都要扫
-    for (let i = 0; i < 40 && !snapName; i += 1) {
+    // 快照自 #103 起被推迟到启动宽限（45s）之后才起跑，再加 tar/gzip 时间——
+    // 这里必须等够（旧代码 delay=0 立即拍，10s 就够）。
+    for (let i = 0; i < 400 && !snapName; i += 1) {
       await new Promise((r) => setTimeout(r, 250));
       for (const p of [defaultAuto(), bkdestAuto()]) {
         const dir = path.dirname(p);
