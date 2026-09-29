@@ -372,10 +372,12 @@ async function main() {
     );
     const mig = await rpc('migrateCheck');
     check(
-      'RPC migrateCheck 检出 v0 descriptor v2 与 v2 自定义 kind',
-      mig?.failCount === 2
+      'RPC migrateCheck 检出 v0 descriptor v2（硬伤）+ 未知 source.kind（提示，不判打不开）',
+      // #113：kind 是开放集合，只能记 warnings；真正判"打不开"的是冻结清单等硬伤。
+      mig?.failCount === 1
         && mig.sessions?.some((s) => s.rel.includes('mig-desc2') && s.findings?.some((f) => f.rule === 'descriptor-version'))
-        && mig.sessions?.some((s) => s.rel.includes('mig-kind') && s.findings?.some((f) => f.rule === 'unknown-source-kind')),
+        && mig.sessions?.some((s) => s.rel.includes('mig-kind') && s.verdict !== 'fail' && s.warnings?.some((w) => w.rule === 'unknown-source-kind'))
+        && mig?.warningCount >= 1,
       JSON.stringify(mig).slice(0, 300),
     );
     check(
