@@ -48,7 +48,7 @@ Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins �
 
 ## Install
 
-Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 trains are all tested; the 0.2.0 train is adapted and pending release — see the [compatibility matrix](docs/compatibility.md) for the current status).
+Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 trains are all tested; the 0.2.0 train is supported since 0.13.2 — see the [compatibility matrix](docs/compatibility.md) for the current status).
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
