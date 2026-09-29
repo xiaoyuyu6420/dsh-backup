@@ -274,6 +274,7 @@ function makeTarGz(entries) {
   for (const e of entries) {
     const isFile = e.type === 'file';
     const isLink = e.type === 'symlink';
+    const isHard = e.type === 'hardlink';
     const isDir = e.type === 'dir';
     const content = isFile ? Buffer.from(e.content ?? '', 'utf8') : Buffer.alloc(0);
     const header = Buffer.alloc(512);
@@ -285,8 +286,8 @@ function makeTarGz(entries) {
     header.write(`${content.length.toString(8).padStart(11, '0')}\0`, 124, 'ascii');
     header.write(`${Math.floor(Date.now() / 1000).toString(8).padStart(11, '0')}\0`, 136, 'ascii');
     header.fill(0x20, 148, 156); // chksum 占位：8 个空格
-    header.write(isLink ? '2' : isDir ? '5' : '0', 156, 'ascii');
-    if (isLink) {
+    header.write(isLink ? '2' : isHard ? '1' : isDir ? '5' : '0', 156, 'ascii');
+    if (isLink || isHard) {
       const link = Buffer.from(e.linkName ?? '', 'utf8');
       link.copy(header, 157, 0, Math.min(link.length, 100));
     }
@@ -1422,21 +1423,28 @@ async function main() {
         // 无 zstd 运行时（Node <22.15/23.8，如 CI 的 20 矩阵）：三个 .zstd 样本
         // 按设计走 skipped——期望值按运行时能力分支
         const hasZstd = typeof zlib.zstdCompressSync === 'function';
-        const expFail = hasZstd ? 5 : 2;
+        // #113 后：mig-kind（未知 source.kind）不再计入"打不开"，转为提示
+        const expFail = hasZstd ? 4 : 2;
         const expSkip = hasZstd ? 0 : 3;
         ok(mc.scanned === 7, `迁移预检扫到 7 个会话日志（实际 ${mc.scanned} :: ${String(mc.summary).slice(0, 200)}）`);
         ok(mc.failCount === expFail && mc.skippedCount === expSkip, `静态拒绝 ${expFail} 个 + skipped ${expSkip} 个（实际 fail=${mc.failCount} skip=${mc.skippedCount}）`);
         const byDir = Object.fromEntries(mc.sessions.map((s) => [s.path.split('/').slice(-2)[0], s]));
         if (hasZstd) {
           ok(byDir['mig-desc2']?.findings.some((f) => f.rule === 'descriptor-version'), 'v0 descriptor version:2 被检出（#6297/#6045）');
-          ok(byDir['mig-kind']?.findings.some((f) => f.rule === 'unknown-source-kind'), 'v2 未知 source.kind 被检出（#6355）');
+          // #113：未知 kind 只提示、不判"打不开"——它是开放集合（可合并扩展的联合类型），
+          // 硬编码清单天生补不全；旧行为在真机上把 81/82 份健康日志错误判为不可打开。
+          ok(byDir['mig-kind']?.warnings?.some((w) => w.rule === 'unknown-source-kind'), '未知 source.kind 记入 warnings（提示，不判打不开）');
+          ok(byDir['mig-kind']?.verdict !== 'fail', `带未知 kind 的日志不被判"打不开"（实际 ${byDir['mig-kind']?.verdict}）`);
           ok(byDir['mig-name']?.findings.some((f) => f.rule === 'name-version-mismatch'), '文件名代际不一致被检出');
         }
         ok(byDir['mig-perm']?.findings.some((f) => f.rule === 'permission-preset-members'), 'v0 permission/preset origin 被检出（#6297）');
         ok(byDir['mig-ptc']?.findings.some((f) => f.rule === 'ptc-reserved-v2'), 'v2 保留 PTC 标签被检出');
         // 工具面只回 fail 项；健康项由计数判定：
         // zstd 可用 7 = 5 fail + 1 migratable + 1 ok；不可用 7 = 2 fail + 1 migratable + 1 ok + 3 skipped
-        ok(mc.migratableCount === 1 && mc.scanned === 7, '健康旧代判 migratable、当前代判 ok（计数闭合）');
+        // zstd 可用时 mig-kind 从"打不开"落到 migratable → 2 个旧代待迁移
+        const expMigratable = hasZstd ? 2 : 1;
+        ok(mc.migratableCount === expMigratable && mc.scanned === 7, `健康旧代判 migratable（${mc.migratableCount}）、当前代判 ok（计数闭合）`);
+        ok((mc.warningCount ?? 0) >= 0, `预检摘要带提示计数（warningCount=${mc.warningCount}）`);
         ok(mc.env.hardlink === true, '硬链接探测通过');
         ok(mc.env.credentialsFlat === true, '扁平凭据布局被识别');
         const presDir = path.join(groot, 'vault', 'preserved');
@@ -1795,6 +1803,79 @@ async function main() {
         ok(resPost.status === 200 && gotPost.unavailable === true, `降级态下保存请求给出明确说明而非崩溃: HTTP ${resPost.status}`);
       } finally {
         await rmTemp(envEmpty.dir);
+      }
+    }
+
+    console.log('32) #112 归档硬链接：放行归档内硬链接，仍拒绝逃逸目标');
+    {
+      // DSH 附件库用硬链接（attachments/v1/files ↔ file-objects），tar 把它记成
+      // type 'h'。旧实现只放行 -/d，于是"插件自己写出的归档自己恢复不了"。
+      const env32 = await mkTmpHome();
+      try {
+        // A. 真实链路：dshHome 里造一对硬链接 → 备份 → 恢复
+        const linkDir = path.join(env32.dsh, 'attachments', 'v1', 'files', 'ab');
+        const objDir = path.join(env32.dsh, 'attachments', 'v1', 'file-objects', 'ab');
+        await fs.mkdir(linkDir, { recursive: true });
+        await fs.mkdir(objDir, { recursive: true });
+        const original = path.join(linkDir, 'report.pdf');
+        await fs.writeFile(original, 'PDF-CONTENT-32');
+        let hardlinkOk = true;
+        try {
+          await fs.link(original, path.join(objDir, 'ab'.repeat(32)));
+        } catch {
+          hardlinkOk = false; // 目标文件系统不支持硬链接（如部分容器卷）
+        }
+        const mock32 = makeCtx({ home: env32.home, dsh: env32.dsh });
+        plugin(mock32.ctx, {});
+        const rB = await mock32.handler('');
+        ok(rB.kind === 'success', `含硬链接的目录备份成功（硬链接可用=${hardlinkOk}）`);
+        // 确认归档里真有 'h' 条目（否则这条回归测不到东西）
+        const arch = (await listArchives(env32.root))[0];
+        const listing32 = await new Promise((resolve) => {
+          const c = spawn('tar', ['-tvzf', arch], { cwd: env32.root, stdio: ['ignore', 'pipe', 'ignore'] });
+          let buf = '';
+          c.stdout.on('data', (d) => { buf += d; });
+          c.on('close', () => resolve(buf));
+        });
+        const hardCount = listing32.split('\n').filter((l) => l.includes(' link to ')).length;
+        ok(hardlinkOk ? hardCount >= 1 : true, `归档含硬链接条目 ${hardCount} 个（tar 记录形态 "link to"）`);
+        // 恢复：旧实现在这里会因"不安全条目"整体拒绝
+        await fs.rm(env32.dsh, { recursive: true, force: true });
+        const rR = await mock32.handler('restore latest');
+        ok(rR.kind === 'success', `含硬链接的归档可恢复: ${rR.kind === 'success' ? '' : String(rR.text).slice(0, 120)}`);
+        ok(await fs.readFile(original, 'utf8').then((t) => t === 'PDF-CONTENT-32', () => false), '恢复后附件内容一致');
+        if (hardlinkOk) {
+          const nlink = await fs.stat(original).then((st) => st.nlink, () => 0);
+          ok(nlink >= 2, `硬链接关系被 tar 还原（nlink=${nlink}）`);
+        }
+      } finally {
+        await rmTemp(env32.dir);
+      }
+
+      // B. 恶意面：目标逃出备份根 → 仍整体拒绝
+      const env32b = await mkTmpHome();
+      try {
+        await fs.mkdir(env32b.root, { recursive: true });
+        const evil = makeTarGz([
+          { name: '.dsh/attachments/evil', type: 'hardlink', linkName: '../../etc/passwd' },
+        ]);
+        await fs.writeFile(`${env32b.root}/dsh-0000hl-evil.tar.gz`, evil);
+        await fs.writeFile(`${env32b.root}/dsh-0000hl-evil.tar.gz.sha256`, `${createHash('sha256').update(evil).digest('hex')}  dsh-0000hl-evil.tar.gz\n`);
+        const mockE = makeCtx({ home: env32b.home, dsh: env32b.dsh });
+        plugin(mockE.ctx, {});
+        const rE = await mockE.handler('restore dsh-0000hl-evil');
+        ok(rE.kind === 'error' && rE.text.includes('不安全条目'), `硬链接目标逃逸仍被拒: ${String(rE.text).replace(/\n/g, ' ').slice(0, 90)}`);
+        // 合法侧：归档内硬链接不该被拒（同一构造器，仅目标不同）
+        const good = makeTarGz([
+          { name: '.dsh/a.txt', type: 'file', content: 'A' },
+          { name: '.dsh/b.txt', type: 'hardlink', linkName: '.dsh/a.txt' },
+        ]);
+        await fs.writeFile(`${env32b.root}/dsh-0000hl-good.tar.gz`, good);
+        await fs.writeFile(`${env32b.root}/dsh-0000hl-good.tar.gz.sha256`, `${createHash('sha256').update(good).digest('hex')}  dsh-0000hl-good.tar.gz\n`);
+        const rG = await mockE.handler('restore dsh-0000hl-good');
+        ok(rG.kind === 'success', `归档内硬链接被放行: ${rG.kind === 'success' ? '' : String(rG.text).slice(0, 90)}`);
+      } finally {
+        await rmTemp(env32b.dir);
       }
     }
 

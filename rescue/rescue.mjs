@@ -173,24 +173,48 @@ function parseTarEntry(line) {
     }
   }
   if (nameIdx < 0 || nameIdx >= f.length) return null;
-  return { type: f[0][0], name: f.slice(nameIdx).join(' ').replace(/\/$/, '') };
+  const rest = f.slice(nameIdx).join(' ');
+  // 链接目标单独摘出（硬链接 `<名> link to <目标>`、符号链接 `<名> -> <目标>`）：
+  // 与插件侧 parseTarEntry 同语义，别把目标混进名字（#112）。
+  let name = rest;
+  let link = null;
+  const hardAt = rest.indexOf(' link to ');
+  if (hardAt >= 0) {
+    name = rest.slice(0, hardAt);
+    link = rest.slice(hardAt + ' link to '.length);
+  } else {
+    const symAt = rest.lastIndexOf(' -> ');
+    if (symAt >= 0) {
+      name = rest.slice(0, symAt);
+      link = rest.slice(symAt + 4);
+    }
+  }
+  return {
+    type: f[0][0],
+    name: name.replace(/\/$/, ''),
+    link: link === null ? null : link.replace(/\/$/, ''),
+  };
 }
 
 function safeEntries(listedText, base) {
   const entries = [];
   const bad = [];
+  const insideBase = (p) => Boolean(p)
+    && !p.startsWith('/') && !/^[A-Za-z]:/.test(p)
+    && !p.split('/').includes('..')
+    && (p === base || p.startsWith(`${base}/`));
   for (const line of listedText.split('\n')) {
     const s = line.trim();
     if (!s) continue;
     const parsed = parseTarEntry(s);
     const name = parsed ? parsed.name.replace(/\\/g, '/').replace(/\/$/, '') : null;
-    if (
-      !parsed || !name
-      || (parsed.type !== '-' && parsed.type !== 'd')
-      || name.startsWith('/') || /^[A-Za-z]:/.test(name)
-      || name.split('/').includes('..')
-      || (name !== base && !name.startsWith(`${base}/`))
-    ) {
+    const link = parsed && parsed.link ? parsed.link.replace(/\\/g, '/').replace(/\/$/, '') : null;
+    // 与插件侧同语义：放行目标也在备份根内的硬链接 'h'（DSH 附件库的正常形态，
+    // 见 issue #112），符号链接/设备等仍拒绝。救援台是宿主起不来时的唯一通路，
+    // 这里漏判会让"插件写出的归档自己都恢复不了"。
+    const plainOk = Boolean(parsed) && Boolean(name) && (parsed.type === '-' || parsed.type === 'd') && insideBase(name);
+    const hardOk = Boolean(parsed) && parsed.type === 'h' && insideBase(name) && insideBase(link);
+    if (!plainOk && !hardOk) {
       bad.push(parsed ? name : s);
     } else {
       entries.push(name);
