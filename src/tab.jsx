@@ -18,7 +18,6 @@ function mb(size, t) {
   return size >= 1048576 ? `${(size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB`;
 }
 
-/** 渲染「备份」标签页。 */
 /** 分类型备份的候选类型（key 与宿主 BACKUP_TYPES 对齐；标签走 locales）。 */
 const TYPE_OPTIONS = [
   ['credentials', 'typeCredentials'],
@@ -47,6 +46,7 @@ export function BackupTabFallback({ panel, t }) {
   );
 }
 
+/** 渲染「备份」标签页。 */
 export function BackupTab({ panel, t }) {
   const [snap, setSnap] = useState(null);
   const [github, setGithub] = useState(null);
@@ -729,6 +729,8 @@ export function BackupTab({ panel, t }) {
                         <button
                           type="button" className="dsb-btn-danger"
                           disabled={busy !== ''} onClick={() => deleteOne(b.name)}
+                          title={t('confirmDeleteName').replace('{name}', b.name)}
+                          aria-label={t('confirmDeleteName').replace('{name}', b.name)}
                         >
                           {busy === `delete:${b.name}` ? t('busy') : t('confirmDelete')}
                         </button>
@@ -736,6 +738,7 @@ export function BackupTab({ panel, t }) {
                         <button
                           type="button" className="dsb-btn-danger"
                           disabled={busy !== ''} onClick={() => setConfirmDelete(b.name)}
+                          title={t('confirmDeleteName').replace('{name}', b.name)}
                         >
                           {t('delete')}
                         </button>

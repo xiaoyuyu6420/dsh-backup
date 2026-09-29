@@ -50,7 +50,7 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 
 ## 安装
 
-要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 列车均已实测，最新验证至 `0.1.5-rc.2`）。
+要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 列车均已实测，0.2.0 列车已适配待发版；当前兼容状态见 [兼容性矩阵](docs/compatibility.md)）。
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup

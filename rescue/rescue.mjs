@@ -108,7 +108,7 @@ async function listBackups(root) {
   }
   const backups = [];
   for (const d of dirents) {
-    if (!d.name.startsWith('dsh-') || d.name.startsWith('dsh-pre-restore-') || d.name.startsWith('dsh-t-') || !d.name.endsWith('.tar.gz')) continue;
+    if (!d.name.startsWith('dsh-') || d.name.startsWith('dsh-pre-restore-') || d.name.startsWith('dsh-pre-upgrade-') || d.name.startsWith('dsh-t-') || !d.name.endsWith('.tar.gz')) continue;
     let size;
     try {
       size = (await fs.stat(`${root}/${d.name}`)).size;
@@ -610,23 +610,27 @@ const show = (r) => {
 const log = (t) => { document.getElementById('log').textContent = typeof t === 'string' ? t : show(t); };
 const dlg = document.getElementById('confirm');
 const fmtSize = (n) => typeof n !== 'number' ? '?' : n >= 1048576 ? (n/1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n/1024)) + 'KB';
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 async function api(op, body) {
   const res = await fetch('/api/' + op, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Dsh-Rescue': '1' }, body: JSON.stringify(body || {}) });
   return res.json();
 }
+let listNames = [];
 async function renderList() {
   const r = await api('list');
   if (!r.ok) { log(r); return; }
-  const rows = r.backups.map(b => '<tr><td>' + b.name + '</td><td>' + fmtSize(b.size) +
-    '</td><td><button onclick="verify(\\'' + b.name + '\\')">校验</button> ' +
-    '<button class="danger" onclick="restore(\\'' + b.name + '\\')">恢复…</button></td></tr>').join('');
+  listNames = r.backups.map(b => b.name);
+  const rows = r.backups.map((b, i) => '<tr><td>' + esc(b.name) + '</td><td>' + fmtSize(b.size) +
+    '</td><td><button onclick="verify(' + i + ')">校验</button> ' +
+    '<button class="danger" onclick="restore(' + i + ')">恢复…</button></td></tr>').join('');
   document.getElementById('list').innerHTML = r.backups.length
     ? '<table><tr><th>备份</th><th>大小</th><th></th></tr>' + rows + '</table>'
     : '<p>备份目录里没有找到归档。</p>';
   log(r.summary || '');
 }
-async function verify(name) { log(await api('verify', { selector: name })); }
-async function restore(name) {
+async function verify(i) { log(await api('verify', { selector: listNames[i] })); }
+async function restore(i) {
+  const name = listNames[i];
   const pre = await api('restore', { selector: name, dryRun: true });
   log(pre);
   if (!pre.ok) return;
