@@ -46,6 +46,19 @@ Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins �
 
 ![Backup settings](docs/assets/panel-settings.png)
 
+## Scope and division of labor: what dsh-backup doesn't do
+
+dsh-backup's job is **whole-workspace backup and disaster recovery**: snapshot `~/.dsh`, verify it, restore it when you need it. Browsing archives, rewinding a conversation and changing settings each have a dedicated plugin in this ecosystem — every tool does its own job, and they can all be installed together.
+
+| Tool | What it focuses on | How it relates to dsh-backup |
+|---|---|---|
+| `@michengai/dsh-archive-manager` | Browsing and managing session archives | Reach for it to browse and tidy archives day to day; whole-workspace snapshots and restore are dsh-backup's side, a different level of the same data. The two can be installed together. |
+| `dsh-rewind-plugin` | Rewinding a session to an earlier point | It works on the conversation itself; dsh-backup works on on-disk copies of the whole workspace — no overlap |
+| `@sparkelf/dsh-plugin-backup` | Backups: keeping copies of your working data | Same direction, different emphasis — dsh-backup centers on whole-workspace snapshots, alongside scheduled automatic backups, `/backup doctor` session-log checks and repair, an out-of-process rescue channel and cross-machine GitHub sync |
+| `dsh-config-manager` | Config management: one place to manage DSH settings | Use it to change settings; use dsh-backup to roll back when a change goes wrong (a `dsh-pre-upgrade-` snapshot is taken automatically before host upgrades) |
+
+A backup is the set-it-and-forget-it, reach-for-it-when-things-break kind of insurance — complementary to archive-browsing, rewind and config-management tools, and all of them can be installed side by side.
+
 ## Install
 
 Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 trains are all tested; the 0.2.0 train is supported since 0.13.2 — see the [compatibility matrix](docs/compatibility.md) for the current status).

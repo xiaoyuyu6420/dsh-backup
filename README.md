@@ -48,6 +48,19 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 
 ![备份设置](docs/assets/panel-settings.png)
 
+## 边界与分工：dsh-backup 不做什么
+
+dsh-backup 的职责是**整库备份与灾难恢复**：把 `~/.dsh` 快照存好、校验好、需要时还原。归档怎么浏览、对话怎么回退、设置怎么改，生态里各有专门插件负责——各司其职，可以并存。
+
+| 工具 | 它擅长什么 | 和 dsh-backup 的关系 |
+|---|---|---|
+| `@michengai/dsh-archive-manager` | 会话归档的浏览与管理 | 日常翻阅、整理归档用它；整库快照与还原是 dsh-backup 的一侧，两者层面不同，可同时安装 |
+| `dsh-rewind-plugin` | 会话回退：把一段对话退回先前状态 | 它面对会话内容本身，dsh-backup 面对磁盘上的整库副本，互不干扰 |
+| `@sparkelf/dsh-plugin-backup` | 备份：为工作数据留存副本 | 同属备份方向、侧重不同——dsh-backup 侧重整库快照，并配定时自动备份、`/backup doctor` 会话日志体检修复、进程外救援通道与跨机 GitHub 同步 |
+| `dsh-config-manager` | 配置管理：集中管理 DSH 的各项设置 | 改设置用它；改坏了要回滚，用 dsh-backup（宿主升级前会自动留一份 `dsh-pre-upgrade-` 快照） |
+
+备份是「装了就忘、出事救命」的保险，与浏览 / 回退 / 配置管理类工具互补，可以同时安装。
+
 ## 安装
 
 要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 列车均已实测，0.2.0 列车自 0.13.2 起支持；当前兼容状态见 [兼容性矩阵](docs/compatibility.md)）。
