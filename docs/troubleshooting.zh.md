@@ -44,7 +44,7 @@
 
 ## 升到 DSH 0.2.0 后装不上本插件：`installation rejected: ... is incompatible with dsh 0.2.0-rc.1`
 
-**原因**：0.2.0 起宿主新增**安装期兼容闸门**——声明了 peerDependencies 的插件，若 peer 范围不覆盖当前宿主版本，`dsh plugin add/update` 会直接拒绝安装（不再只是警告）。
+**原因**：宿主自 **0.1.7-rc.1** 起有**安装期兼容闸门**——声明了 peerDependencies（且名字是 `@deepseek-ai/dsh` 或 `@deepseek-ai/dsh-*`）的插件，若 peer 范围不覆盖当前宿主版本，`dsh plugin add/update` 会直接拒绝安装（不再只是警告）。跨 minor 列车（如 0.1.x → 0.2.x）尤其容易撞上：semver 对带 prerelease 下界的 caret 会把上界压到 `<下一个 minor>-0`，所以每换一个 minor 都要显式加一档范围。
 
 **处理**：升级到 **0.13.2+**（peers/engines 已包含 `^0.2.0-rc.1`）。若你暂时不能升级，可按宿主的提示手动豁免（仅限你确认过风险时）：
 
