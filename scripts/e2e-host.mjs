@@ -157,7 +157,7 @@ async function main() {
   // 不用 `dsh plugin add <repo>`（link 方式）：link 引导的 profile 里 panel RPC 报
   // `active Service "backupPanel" is unavailable`（宿主 link 路径的差异，npm/tarball 正常）。
   // tarball 安装 = 真实用户路径，且顺带验证发布物内容。
-  if (!spawnSync('dsh', ['--version']).status === 0) throw new Error('PATH 里找不到 dsh CLI');
+  if (spawnSync('dsh', ['--version']).status !== 0) throw new Error('PATH 里找不到 dsh CLI');
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-'));
   packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-pack-'));
   console.log(`[e2e-host] 打包 tarball...`);
