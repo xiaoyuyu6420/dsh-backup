@@ -52,10 +52,10 @@ dsh-backup's job is **whole-workspace backup and disaster recovery**: snapshot `
 
 | Tool | What it focuses on | How it relates to dsh-backup |
 |---|---|---|
-| `@michengai/dsh-archive-manager` | Browsing and managing session archives | Reach for it to browse and tidy archives day to day; whole-workspace snapshots and restore are dsh-backup's side, a different level of the same data. The two can be installed together. |
-| `dsh-rewind-plugin` | Rewinding a session to an earlier point | It works on the conversation itself; dsh-backup works on on-disk copies of the whole workspace — no overlap |
-| `@sparkelf/dsh-plugin-backup` | Backups: keeping copies of your working data | Same direction, different emphasis — dsh-backup centers on whole-workspace snapshots, alongside scheduled automatic backups, `/backup doctor` session-log checks and repair, an out-of-process rescue channel and cross-machine GitHub sync |
-| `dsh-config-manager` | Config management: one place to manage DSH settings | Use it to change settings; use dsh-backup to roll back when a change goes wrong (a `dsh-pre-upgrade-` snapshot is taken automatically before host upgrades) |
+| `@michengai/dsh-archive-manager` | Browsing and managing session archives: search, filters, favorites, batch archive / unarchive | Reach for it to browse and tidy archives day to day; whole-workspace `~/.dsh` snapshots and restore are dsh-backup's side. The two work at different levels and can be installed together. |
+| `dsh-rewind-plugin` | Rewinding a conversation in place, restoring the matching workspace files along with it | It acts on the live session and its workspace files; dsh-backup acts on whole-workspace copies of `~/.dsh` — no overlap |
+| `@sparkelf/dsh-plugin-backup` | Whole-copy backups of user data, with a settings panel | Same backup direction: dsh-backup covers whole-workspace `~/.dsh` snapshots plus scheduled automatic backups, `/backup doctor` session-log checks and repair, an out-of-process rescue channel and cross-machine GitHub sync. The two can coexist. |
+| `dsh-config-manager` | Backup, restore and migration of your DSH configuration: export/import, snapshot restore (undo an import), scheduled full backups, with a preview before writing and automatic rollback on failure | Same backup direction: its surface is a GUI export/import and cross-machine migration flow for the configuration layer (per-item conflict decisions, path remapping), while dsh-backup's is whole-workspace `~/.dsh` snapshots from the CLI and panel, session-log checks and the rescue channel for when the host won't boot. The two can coexist. |
 
 A backup is the set-it-and-forget-it, reach-for-it-when-things-break kind of insurance — complementary to archive-browsing, rewind and config-management tools, and all of them can be installed side by side.
 
