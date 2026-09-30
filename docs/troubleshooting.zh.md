@@ -85,6 +85,18 @@ dsh plugin --profile web allow-version @xiaoyuyu6420/dsh-backup@<版本> --dsh-v
 
 **影响版本**：0.12.0 – 0.13.0。**处理**：升级到 **0.13.1+**。临时绕过：用命令 `/backup github token <token>`（宿主半通路一直正常）。
 
+## 面板「更新到 x.y.z」点完，版本没动（仍停在旧版）
+
+**影响版本**：0.13.0 – 0.13.2。**原因**：更新按钮执行的是 pnpm 的 `update <包名>`，而 pnpm 只在 profile 里**声明的版本范围**内升级——安装时写入的是 `^0.12.0` 这类范围，跨 minor 时会停在 0.12.2，命令本身却已成功返回，回执因此看起来像是更新成功了。
+
+**处理**：手动执行（`--latest` 会跨出声明范围取 npm 上的 latest）：
+
+```sh
+dsh plugin --profile web update --latest @xiaoyuyu6420/dsh-backup
+```
+
+重启 `dsh web` 生效。主线已修正：更新按钮自动带 `--latest`，并在跑完后**读回 profile 内的真实版本**核对——版本没动就如实报错给出这条命令，不再谎报「已更新到最新」（随下个版本发布）。
+
 ## 装了本插件后，同页面的其它插件失灵（如 dsh-vscode-mode 的 Monaco 编辑器坏了）
 
 **影响版本**：≤ 0.12.0。**原因**：client bundle 顶层 `var module` 泄漏成 `window.module`，让页面上其它 AMD 加载器误判成 Node 环境。
