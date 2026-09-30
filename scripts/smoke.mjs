@@ -1589,6 +1589,13 @@ async function main() {
       const run29 = mock29.handler;
       try {
         // (a) 有新版：registry 返回 9.9.9 → 检查可见、一键更新走 dsh CLI、快照先留
+        //     假 CLI 不会真的改 profile，故预写「pnpm 跑完后的」profile 版本用于读回核对。
+        const profDir = path.join(env29.dsh, 'profiles', 'web', 'node_modules', pkgMeta.name);
+        const writeInstalled = async (v) => {
+          await fs.mkdir(profDir, { recursive: true });
+          await fs.writeFile(path.join(profDir, 'package.json'), JSON.stringify({ name: pkgMeta.name, version: v }));
+        };
+        await writeInstalled('9.9.9');
         globalThis.fetch = async () => ({ ok: true, json: async () => ({ 'dist-tags': { latest: '9.9.9' } }) });
         const c1 = await run29('check-update');
         ok(c1.kind === 'success' && c1.text.includes('9.9.9'), `check-update 发现新版本: ${c1.text.split('\n')[0]}`);
@@ -1597,7 +1604,12 @@ async function main() {
         const snaps29 = await fs.readdir(env29.root).then((ns) => ns.filter((n) => n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz')));
         ok(snaps29.length === 1, `更新前快照已生成（实际 ${snaps29.length} 份）`);
         const argvLog = (await fs.readFile(logPath, 'utf8')).trim();
-        ok(argvLog === JSON.stringify(['plugin', '--profile', 'web', 'update', pkgMeta.name]), `dsh CLI argv 正确: ${argvLog.slice(0, 80)}`);
+        ok(argvLog === JSON.stringify(['plugin', '--profile', 'web', 'update', '--latest', pkgMeta.name]), `dsh CLI argv 带 --latest（pnpm update 默认只在声明范围内升级）: ${argvLog.slice(0, 90)}`);
+        // (a2) 命令跑完但版本没动（profile 里锁着旧版 / pnpm 忽略 --latest）：读回核对必须如实报错，不许谎报「已更新到 9.9.9」
+        await writeInstalled('1.0.0');
+        const u1b = await run29('update');
+        ok(u1b.kind === 'error' && u1b.text.includes('1.0.0') && u1b.text.includes('9.9.9') && u1b.text.includes('--latest'),
+          `更新未生效时如实报错并给出手动命令: ${u1b.text.split('\n').join(' | ').slice(0, 140)}`);
         // (b) 网络失败：check 与 update 都静默降级为可读错误，绝不抛异常阻断
         globalThis.fetch = async () => { throw new Error('ENOTFOUND registry.npmjs.org'); };
         const c2 = await run29('check-update');
