@@ -1087,6 +1087,19 @@ async function main() {
         const ver = r(['verify']);
         ok(ver.status === 0 && ver.stdout.includes('✅'), 'rescue verify 通过');
 
+        // #117：新代（v4）会话日志也要被救援台看见——救援台与 lib 共用同一「文件名代」
+        // 判据，宿主起不来时它是唯一通道，换代当天失明的代价最大。差分断言：加一份
+        // v4 日志，救援台 doctor 的扫描计数必须 +1（不依赖运行时是否有 zstd）。
+        const preCount = Number((r(['doctor']).stdout.match(/扫描 (\d+) 个会话日志/) || [])[1] ?? -1);
+        await fs.mkdir(path.join(sessDir, 'v4-live'), { recursive: true });
+        await fs.writeFile(path.join(sessDir, 'v4-live', 'session.v4.jsonl'), `${[
+          JSON.stringify({ type: 'session', version: 4, id: 'sess-v4r', createdAt: 1724544000000, delegationDepth: 0 }),
+          JSON.stringify({ type: 'user/message', seq: 0, time: 1000, data: { id: 'm0', role: 'user', content: [], source: { kind: 'user' } } }),
+        ].join('\n')}\n`);
+        const postDoc23 = r(['doctor']);
+        const postCount = Number((postDoc23.stdout.match(/扫描 (\d+) 个会话日志/) || [])[1] ?? -1);
+        ok(preCount > 0 && postCount === preCount + 1, `救援台按世代形态认出 v4 日志（扫描计数 ${preCount} → ${postCount}）`);
+
         // webui HTTP：页面可访问、缺自定义头的写操作被 403（CSRF 防御）
         const srv = spawn(process.execPath, [rescueFile, 'serve', '--port', '13197'], { env: { ...process.env, DSH_HOME: env23.dsh }, stdio: 'ignore' });
         try {
@@ -1439,10 +1452,10 @@ async function main() {
         }
         ok(byDir['mig-perm']?.findings.some((f) => f.rule === 'permission-preset-members'), 'v0 permission/preset origin 被检出（#6297）');
         ok(byDir['mig-ptc']?.findings.some((f) => f.rule === 'ptc-reserved-v2'), 'v2 保留 PTC 标签被检出');
-        // 工具面只回 fail 项；健康项由计数判定：
-        // zstd 可用 7 = 5 fail + 1 migratable + 1 ok；不可用 7 = 2 fail + 1 migratable + 1 ok + 3 skipped
-        // zstd 可用时 mig-kind 从"打不开"落到 migratable → 2 个旧代待迁移
-        const expMigratable = hasZstd ? 2 : 1;
+        // 工具面只回 fail 项；健康项由计数判定（校准代已是 v4，#117）：
+        // zstd 可用 7 = 4 fail + 3 migratable（mig-kind/mig-old/mig-v3）+ 0 ok
+        // 不可用   7 = 2 fail + 2 migratable（mig-old/mig-v3）+ 3 skipped
+        const expMigratable = hasZstd ? 3 : 2;
         ok(mc.migratableCount === expMigratable && mc.scanned === 7, `健康旧代判 migratable（${mc.migratableCount}）、当前代判 ok（计数闭合）`);
         ok((mc.warningCount ?? 0) >= 0, `预检摘要带提示计数（warningCount=${mc.warningCount}）`);
         ok(mc.env.hardlink === true, '硬链接探测通过');
@@ -1888,6 +1901,64 @@ async function main() {
         ok(rG.kind === 'success', `归档内硬链接被放行: ${rG.kind === 'success' ? '' : String(rG.text).slice(0, 90)}`);
       } finally {
         await rmTemp(env32b.dir);
+      }
+    }
+
+    // #117：会话日志按「文件名代」（session[.vN].jsonl[.zstd]，宿主 sessionFormatLogFilename
+    // 的形态）识别——写死 v0/v3 名字会让格式换代当天的机器**整体失明**：doctor 报"没找到
+    // 会话日志"、迁移预检形同虚设（真机 22 份 v4 全看不见）。同时校准代推进到 v4，且
+    // 「比校准代更新」只提示不判"打不开"（判据不得落在会滞后的表上，#113 同款纪律）。
+    console.log('33) #117 新代会话日志（v4）：doctor/migrate 按文件名代识别，未知来源 kind 只提示');
+    {
+      const env33 = await mkTmpHome();
+      try {
+        const mock33 = makeCtx({ home: env33.home, dsh: env33.dsh });
+        plugin(mock33.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        const sessDir = path.join(env33.dsh, 'sessions', '--v4--');
+        const hasZstd33 = typeof zlib.zstdCompressSync === 'function';
+        const zc33 = hasZstd33 ? (t) => zlib.zstdCompressSync(t) : () => Buffer.from('placeholder');
+        const hdr33 = (v, id) => JSON.stringify({ type: 'session', version: v, id, createdAt: 1724544000000, delegationDepth: 0 });
+        const usr = (seq, kind) => JSON.stringify({ type: 'user/message', seq, time: 1000, data: { id: `m${seq}`, role: 'user', content: [], source: { kind } } });
+        // zstd 侧逐行分帧（与宿主容器契约一致：首帧必须恰好一行 header）
+        const writeLog33 = async (dirName, fileName, lines) => {
+          await fs.mkdir(path.join(sessDir, dirName), { recursive: true });
+          const buf = fileName.endsWith('.zstd')
+            ? (hasZstd33 ? Buffer.concat(lines.map((l) => zc33(`${l}\n`))) : zc33('placeholder'))
+            : Buffer.from(`${lines.join('\n')}\n`, 'utf8');
+          await fs.writeFile(path.join(sessDir, dirName, fileName), buf);
+        };
+        // ① v4 健康（当前代）
+        await writeLog33('v4-good', 'session.v4.jsonl', [hdr33(4, 'v4-good'), usr(0, 'runtime-context')]);
+        // ② v3 旧代（校准代已是 v4 → 待迁移）
+        await writeLog33('v3-old', 'session.v3.jsonl', [hdr33(3, 'v3-old'), usr(0, 'user')]);
+        // ③ v4 + 已知名单外的来源 kind（社区插件自造）→ 提示，不判打不开
+        await writeLog33('v4-kind', 'session.v4.jsonl', [hdr33(4, 'v4-kind'), usr(0, 'dsh-mnemon')]);
+        // ④ 未来代 v5 → 提示（读不读得了由宿主决定，不替宿主判"打不开"）
+        await writeLog33('v5-future', 'session.v5.jsonl', [hdr33(5, 'v5-future'), usr(0, 'user')]);
+        // ⑤ 文件名代与 header 不一致（v4 名 + v3 header）→ 宿主按不一致直接拒载，判 fail
+        await writeLog33('v4-mismatch', 'session.v4.jsonl', [hdr33(3, 'v4-mismatch'), usr(0, 'user')]);
+        // ⑥ zstd 容器里的 v4（真机形态）
+        await writeLog33('v4-zstd', 'session.v4.jsonl.zstd', [hdr33(4, 'v4-zstd'), usr(0, 'user')]);
+
+        const doc33 = await mock33.tool().execute({ mode: 'doctor' }, {});
+        ok(doc33.scanned === 6, `doctor 认出 6 份新老代会话日志（实际 ${doc33.scanned}）`);
+        ok(!String(doc33.summary).includes('未找到任何会话日志'), `doctor 不再误报"未找到会话日志": ${String(doc33.summary).slice(0, 70)}`);
+        ok(doc33.corruptCount === 0, `doctor 对新代无误报损坏（实际 ${doc33.corruptCount}）`);
+
+        const mc33 = await mock33.tool().execute({ mode: 'migrate' }, {});
+        ok(mc33.scanned === 6, `迁移预检扫到 6 份（实际 ${mc33.scanned}）`);
+        const expSkip33 = hasZstd33 ? 0 : 1;
+        ok(mc33.failCount === 1 && mc33.skippedCount === expSkip33 && mc33.migratableCount === 1,
+          `仅"文件名与 header 不一致"判 fail：fail=${mc33.failCount}/migratable=${mc33.migratableCount}/skip=${mc33.skippedCount}`);
+        ok(mc33.warningCount === 2, `两份带提示（未知 kind + 未来代）计入 warningCount（实际 ${mc33.warningCount}）`);
+        const by33 = Object.fromEntries(mc33.sessions.map((s) => [s.path.split('/').slice(-2)[0], s]));
+        ok(by33['v4-mismatch']?.findings.some((f) => f.rule === 'name-version-mismatch'), 'v4 文件名与 header 代不一致被检出');
+        ok(by33['v4-kind']?.warnings?.some((w) => w.rule === 'unknown-source-kind'), 'v4 上未知来源 kind 记入提示（不判打不开）');
+        ok(by33['v5-future']?.warnings?.some((w) => w.rule === 'newer-generation'), '更新代（v5）记入提示（不替宿主判"打不开"）');
+        ok(!String(mc33.summary).includes('未找到'), '迁移预检不再"没找到会话日志"');
+        ok(String(mc33.summary).includes('格式代校准到 v4'), '摘要标注格式代校准边界');
+      } finally {
+        await rmTemp(env33.dir);
       }
     }
 

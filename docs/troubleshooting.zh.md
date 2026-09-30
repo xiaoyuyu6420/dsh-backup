@@ -22,6 +22,14 @@
 
 **机制**：每次备份前都会先体检——损坏的会话日志**不入档**，隔离清单记入 `.meta.json`，防止坏字节进归档后轮换把最后一份好副本也带走。
 
+## `/backup doctor` 或 `/backup migrate-check` 说「未找到任何会话日志」，但会话明明都在
+
+**影响版本**：≤ 0.13.2。**原因**：会话日志文件名里带着格式代（`session.v4.jsonl.zstd`，即宿主 `sessionFormatLogFilename` 的形态），而插件把文件名写死成了第 0 代的两种（`session.jsonl` / `session.jsonl.zstd`）——宿主 0.1.7 起会话格式进入 **v4**，于是体检与迁移预检对**全部** v4 日志失明（真机实测：22 份会话一份都看不见）。
+
+**处理**：升级到修复版（主线已修：按文件名形态识别 `session[.vN].jsonl[.zstd]`，格式代校准推进到 v4；比校准代更新的日志只提示、不误判）。**备份与恢复不受影响**——`sessions/` 是按目录整体入档的，这条只影响体检与迁移预检的可见性。
+
+**自查**：`ls ~/.dsh/sessions/*/*/ | head` 若看到 `session.v4.jsonl.zstd` 这类带 `.vN` 的文件名，就对上了。
+
 ## 备份「成功」了，但归档只有几十字节（Windows）
 
 **症状**：`dsh-<时间戳>.tar.gz` 大小恒为 29 字节；没有 `.sha256`、没有 `.meta.json`；tar 的 stderr 是 `Couldn't visit directory: No such file or directory`。

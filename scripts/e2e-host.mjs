@@ -370,7 +370,19 @@ async function main() {
       path.join(sessRoot, 'mig-ok', 'session.v3.jsonl'),
       [migHdr(3, 's-ok'), migEv(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'user' } })].join('\n') + '\n',
     );
+    // #117：新代（v4）日志——真宿主 0.2.0 列车写的正是 session.v4.jsonl[.zstd]，
+    // 文件名写死会在换代当天让体检/预检整体失明；这里锁住"新代必须被看见、且不误判"。
+    fs.mkdirSync(path.join(sessRoot, 'mig-v4'), { recursive: true });
+    fs.writeFileSync(
+      path.join(sessRoot, 'mig-v4', 'session.v4.jsonl'),
+      [migHdr(4, 's-v4'), migEv(0, 'user/message', { id: 'm0', role: 'user', content: [], source: { kind: 'runtime-context' } })].join('\n') + '\n',
+    );
     const mig = await rpc('migrateCheck');
+    check(
+      'RPC migrateCheck 认出新代（v4）日志且不判 fail（#117）',
+      mig?.sessions?.some((s) => s.rel.includes('mig-v4') && s.verdict !== 'fail' && s.version === 4) && mig?.scanned >= 4,
+      JSON.stringify({ scanned: mig?.scanned, v4: (mig?.sessions || []).find((s) => s.rel.includes('mig-v4')) }).slice(0, 220),
+    );
     check(
       'RPC migrateCheck 检出 v0 descriptor v2（硬伤）+ 未知 source.kind（提示，不判打不开）',
       // #113：kind 是开放集合，只能记 warnings；真正判"打不开"的是冻结清单等硬伤。
