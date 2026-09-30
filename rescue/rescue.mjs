@@ -37,7 +37,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SENSITIVE_DEFAULTS = ['.credentials.yaml', '.env', 'qq-bridge/config.json'];
 const VAULT_DIR = 'vault';
 const ZSTD_MAGIC = 0xfd2fb528;
-const SESSION_LOG_NAMES = new Set(['session.jsonl.zstd', 'session.jsonl']);
+// 与 lib/index.js 同源：会话日志名形如 session[.v<N>].jsonl[.zstd]（宿主
+// sessionFormatLogFilename 的形态）。写死具体名字会在格式换代当天整体失明
+// （#117）——救援台是宿主起不来时的唯一通道，更不能看不见会话。
+const SESSION_LOG_RE = /^session(?:\.v([1-9][0-9]*))?\.jsonl(?:\.zstd)?$/;
+const isSessionLogName = (name) => SESSION_LOG_RE.test(name);
 const SCAN_SKIP_DIRS = new Set(['node_modules', '.system', '.git', 'vault']);
 const SCAN_MAX_FILES = 4000;
 const SCAN_MAX_DEPTH = 8;
@@ -362,7 +366,7 @@ async function collectSessionLogs(dir, relPrefix, depth, out) {
     if (d.isDirectory()) {
       if (SCAN_SKIP_DIRS.has(d.name)) continue;
       await collectSessionLogs(`${dir}/${d.name}`, rel, depth + 1, out);
-    } else if (SESSION_LOG_NAMES.has(d.name)) {
+    } else if (isSessionLogName(d.name)) {
       out.push({ abs: `${dir}/${d.name}`, rel });
     }
   }
