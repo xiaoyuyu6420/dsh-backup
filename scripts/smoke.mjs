@@ -14,9 +14,11 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 // 命名空间导入：zstd 系导出在 Node <22.15/23.8 不存在，具名导入会让整个
 // 套件加载失败——套件本身要能跨运行时启动才能测插件的降级路径。
 import * as zlib from 'node:zlib';
@@ -94,17 +96,29 @@ function makeCtx({ home, dsh, env, fake, missing, settingsMode }) {
     return name; // POSIX 依赖 PATH
   }
 
+  /**
+   * 假 subprocess：真跑子进程，并**如实复刻宿主 dsh-subprocess 的收集语义**。
+   *
+   * #119 的教训：旧桩无条件返回全量输出，于是"输出超过 spill 上限被截断"这条真机
+   * 故障在冒烟里永远看不见（tar 清单 1.3 MB > 1 MB 上限 → 宿主丢弃 spill → 校验器
+   * 只看到 8 KB 尾窗碎片 → 误判"不安全条目"拒绝整包）。现在：
+   *   - `stdout: 'pipe'` → 暴露原始 Readable（宿主契约：present iff 'pipe'）；
+   *   - collect：超过 maxBytes 只留**尾部**且 lossy；有 spill 且未超 spill 上限时
+   *     写一份完整输出并给 spillPath；**超过 spill 上限则不给 spillPath**（宿主
+   *     discardSpill() 的等价物——这正是 #119 的现场）。
+   */
   function spawnProc(spec) {
+    const abortedHandle = () => ({
+      done: Promise.resolve({ exitCode: null, signal: 'SIGTERM' }),
+      terminate: () => {},
+      collected: {
+        stdout: { readFrom: () => ({ get text() { return ''; } }) },
+        stderr: { readFrom: () => ({ get text() { return ''; } }) },
+      },
+    });
     if (spec.signal?.aborted) {
       // 已取消的调用不再启动子进程：立即按被终止分类返回
-      const done = Promise.resolve({ exitCode: null, signal: 'SIGTERM' });
-      return {
-        done,
-        collected: {
-          stdout: { readFrom: () => ({ get text() { return ''; } }) },
-          stderr: { readFrom: () => ({ get text() { return ''; } }) },
-        },
-      };
+      return abortedHandle();
     }
     // 假命令替换：argv[0] 形如 `__fake__:dsh` 时换成 fake.dsh 的启动数组
     let argv = spec.argv;
@@ -114,24 +128,50 @@ function makeCtx({ home, dsh, env, fake, missing, settingsMode }) {
       if (base) argv = [...base, ...argv.slice(1)];
     }
     const child = spawn(argv[0], argv.slice(1), { cwd: spec.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const pipes = {
+      stdout: spec.stdio?.stdout === 'pipe' ? new PassThrough() : null,
+      stderr: spec.stdio?.stderr === 'pipe' ? new PassThrough() : null,
+    };
     let out = '';
     let err = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
+    child.stdout.on('data', (d) => { out += d; pipes.stdout?.write(d); });
+    child.stderr.on('data', (d) => { err += d; pipes.stderr?.write(d); });
     const onAbort = () => child.kill();
     spec.signal?.addEventListener('abort', onAbort, { once: true });
     const done = new Promise((resolve) => {
       child.on('close', (code) => {
         spec.signal?.removeEventListener('abort', onAbort);
+        pipes.stdout?.end();
+        pipes.stderr?.end();
         resolve(code === null ? { exitCode: null, signal: 'SIGTERM' } : { exitCode: code, signal: null });
       });
     });
+    // 收集读取器：offset 语义按宿主的 readFrom（这里测试只从 0 读）
+    const reader = (getText, mode) => ({
+      readFrom: () => {
+        const text = getText();
+        const bytes = Buffer.from(text, 'utf8');
+        if (typeof mode !== 'object' || mode === null) return { text, nextOffset: bytes.length, lossy: false };
+        const maxBytes = Number(mode.maxBytes) || 0;
+        if (bytes.length <= maxBytes) return { text, nextOffset: bytes.length, lossy: false };
+        const tail = bytes.subarray(bytes.length - maxBytes).toString('utf8');
+        const spillMax = mode.spill?.maxBytes;
+        if (typeof spillMax === 'number' && bytes.length <= spillMax) {
+          const p = path.join(os.tmpdir(), `smoke-spill-${randomBytes(6).toString('hex')}.log`);
+          try { writeFileSync(p, bytes); } catch { return { text: tail, nextOffset: bytes.length, lossy: true }; }
+          return { text: tail, nextOffset: bytes.length, lossy: true, spillPath: p };
+        }
+        // 超过 spill 上限：宿主丢弃 spill 文件 → lossy 且**没有** spillPath（#119 现场）
+        return { text: tail, nextOffset: bytes.length, lossy: true };
+      },
+    });
     return {
       done,
-      collected: {
-        stdout: { readFrom: () => ({ get text() { return out; } }) },
-        stderr: { readFrom: () => ({ get text() { return err; } }) },
-      },
+      // 宿主 handle 的终止动词（#119：流式校验一旦发现违规条目就提前 terminate）
+      terminate: () => { try { child.kill(); } catch { /* 可能已自然退出 */ } },
+      ...(pipes.stdout ? { stdout: pipes.stdout } : {}),
+      ...(pipes.stderr ? { stderr: pipes.stderr } : {}),
+      collected: { stdout: reader(() => out, spec.stdio?.stdout), stderr: reader(() => err, spec.stdio?.stderr) },
     };
   }
 
@@ -1959,6 +1999,44 @@ async function main() {
         ok(String(mc33.summary).includes('格式代校准到 v4'), '摘要标注格式代校准边界');
       } finally {
         await rmTemp(env33.dir);
+      }
+    }
+
+    // #119：归档清单超过 collect 的 spill 上限时，宿主**丢弃 spill 文件**、只给 8 KB
+    // 内存尾窗——旧实现把这段"断在文件名中间的碎片"当成不安全条目，**整包被拒绝恢复**
+    // （备份成功、verify 报完整、面板正常列出，只在恢复时炸）；同一路径还会让藏在清单
+    // 前段的越界条目**完全不被检查**。清单必须走原始流逐行校验（无上限）。
+    console.log('34) #119 大清单归档：清单超 spill 上限也不得误拒，越界条目仍被拦');
+    {
+      const env34 = await mkTmpHome();
+      try {
+        const mock34 = makeCtx({ home: env34.home, dsh: env34.dsh });
+        plugin(mock34.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        const sha34 = (b) => createHash('sha256').update(b).digest('hex');
+        await fs.mkdir(env34.root, { recursive: true }); // 备份目的地此时还没被创建过
+        // 2 万个 ~90 字节名字的条目（模拟附件/内容寻址账本这类大树）→ 清单远超 1 MiB
+        const many34 = [];
+        for (let i = 0; i < 20000; i += 1) {
+          many34.push({ name: `.dsh/aux/blob-${String(i).padStart(5, '0')}-${'a'.repeat(60)}.bin`, type: 'file', content: '' });
+        }
+        const big34 = makeTarGz(many34);
+        await fs.writeFile(`${env34.root}/dsh-0000big.tar.gz`, big34);
+        await fs.writeFile(`${env34.root}/dsh-0000big.tar.gz.sha256`, `${sha34(big34)}  dsh-0000big.tar.gz\n`);
+        // 前置条件：清单确实超过 1 MiB，否则本条测试会静默失去意义
+        const listing34 = spawnSync('tar', ['-tvzf', `${env34.root}/dsh-0000big.tar.gz`], { encoding: 'utf8', maxBuffer: 64 << 20 });
+        ok((listing34.stdout || '').length > (1 << 20), `夹具清单超过 1 MiB（实际 ${(listing34.stdout || '').length} 字节）`);
+        // ① 干净的大清单：dry-run 必须成功（旧实现：碎片误判 → 整包拒绝）
+        const dry34 = await mock34.handler('restore dsh-0000big --dry-run');
+        ok(dry34.kind === 'success', `大清单归档 dry-run 通过: ${String(dry34.text).replace(/\n/g, ' ').slice(0, 110)}`);
+        // ② 越界条目放在清单最前段（超上限时它正落在"看不见"的一侧）：必须仍被拦
+        const evil34 = makeTarGz([{ name: '../escape.txt', type: 'file', content: 'x' }, ...many34]);
+        await fs.writeFile(`${env34.root}/dsh-0000evl.tar.gz`, evil34);
+        await fs.writeFile(`${env34.root}/dsh-0000evl.tar.gz.sha256`, `${sha34(evil34)}  dsh-0000evl.tar.gz\n`);
+        const bad34 = await mock34.handler('restore dsh-0000evl --dry-run');
+        ok(bad34.kind === 'error' && String(bad34.text).includes('不安全条目') && String(bad34.text).includes('escape.txt'),
+          `大清单前段的越界条目仍被按名拦下: ${String(bad34.text).replace(/\n/g, ' ').slice(0, 110)}`);
+      } finally {
+        await rmTemp(env34.dir);
       }
     }
 
