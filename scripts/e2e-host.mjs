@@ -555,6 +555,26 @@ async function main() {
     check('从更早归档 A 定点修复且字节一致', repQ?.ok === true && repQ?.repaired?.length === 1 && bytesOk, `${JSON.stringify(repQ).slice(0, 160)} bytes=${bytesOk}`);
     const rescanQ = await rpc('doctorScan');
     check('修复后复扫全绿', rescanQ?.ok === true && rescanQ?.corruptCount === 0, JSON.stringify(rescanQ).slice(0, 120));
+
+    // ---------- #119：清单超过 collect spill 上限的大归档（真宿主） ----------
+    // 宿主 collect 的 spill 有上限，超限即**丢弃 spill 文件**、只留 8 KB 内存尾窗——
+    // 校验器若把尾窗当清单，会把"断在文件名中间的碎片"判成不安全条目、拒绝整包
+    // （备份成功、verify 通过、面板正常列出，只在恢复时炸）。故清单改走原始流逐行
+    // 校验；这里在真宿主上造一份清单 > 1 MiB 的备份，dry-run 恢复必须成功。
+    {
+      const bigRoot = path.join(home, 'aux-big');
+      for (let d = 0; d < 50; d += 1) fs.mkdirSync(path.join(bigRoot, `d${String(d).padStart(2, '0')}`), { recursive: true });
+      for (let i = 0; i < 20000; i += 1) {
+        fs.writeFileSync(path.join(bigRoot, `d${String(i % 50).padStart(2, '0')}`, `blob-${String(i).padStart(5, '0')}-${'a'.repeat(40)}.bin`), '');
+      }
+      const bkBig = await rpc('backup');
+      check('大清单夹具备份成功（#119）', bkBig?.ok === true, JSON.stringify(bkBig).slice(0, 140));
+      const bigPath = String(bkBig?.path ?? '');
+      const listBig = spawnSync('tar', ['-tvzf', bigPath], { encoding: 'utf8', maxBuffer: 128 << 20 });
+      check('该归档清单超过 1 MiB（否则本段失去意义）', (listBig.stdout || '').length > (1 << 20), `listing=${(listBig.stdout || '').length}`);
+      const rsBig = await rpc('restore', { selector: path.basename(bigPath), dryRun: true });
+      check('大清单归档 dry-run 恢复通过（#119）', rsBig?.ok === true, JSON.stringify(rsBig).slice(0, 200));
+    }
   }
 
   // ---------- 总结 ----------
