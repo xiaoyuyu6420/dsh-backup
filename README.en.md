@@ -46,6 +46,19 @@ Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins �
 
 ![Backup settings](docs/assets/panel-settings.png)
 
+## Scope and division of labor: what dsh-backup doesn't do
+
+dsh-backup's job is **whole-workspace backup and disaster recovery**: snapshot `~/.dsh`, verify it, restore it when you need it. Browsing archives, rewinding a conversation and changing settings each have a dedicated plugin in this ecosystem — every tool does its own job, and they can all be installed together.
+
+| Tool | What it focuses on | How it relates to dsh-backup |
+|---|---|---|
+| `@michengai/dsh-archive-manager` | Browsing and managing session archives: search, filters, favorites, batch archive / unarchive | Reach for it to browse and tidy archives day to day; whole-workspace `~/.dsh` snapshots and restore are dsh-backup's side. The two work at different levels and can be installed together. |
+| `dsh-rewind-plugin` | Rewinding a conversation in place, restoring the matching workspace files along with it | It acts on the live session and its workspace files; dsh-backup acts on whole-workspace copies of `~/.dsh` — no overlap |
+| `@sparkelf/dsh-plugin-backup` | Whole-copy backups of user data, with a settings panel | Same backup direction: dsh-backup covers whole-workspace `~/.dsh` snapshots plus scheduled automatic backups, `/backup doctor` session-log checks and repair, an out-of-process rescue channel and cross-machine GitHub sync. The two can coexist. |
+| `dsh-config-manager` | Backup, restore and migration of your DSH configuration: export/import, snapshot restore (undo an import), scheduled full backups, with a preview before writing and automatic rollback on failure | Same backup direction: its surface is a GUI export/import and cross-machine migration flow for the configuration layer (per-item conflict decisions, path remapping), while dsh-backup's is whole-workspace `~/.dsh` snapshots from the CLI and panel, session-log checks and the rescue channel for when the host won't boot. The two can coexist. |
+
+A backup is the set-it-and-forget-it, reach-for-it-when-things-break kind of insurance — complementary to archive-browsing, rewind and config-management tools, and all of them can be installed side by side.
+
 ## Install
 
 Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 trains are all tested; the 0.2.0 train is supported since 0.13.2 — see the [compatibility matrix](docs/compatibility.md) for the current status).
