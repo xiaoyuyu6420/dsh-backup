@@ -2040,6 +2040,65 @@ async function main() {
       }
     }
 
+    console.log('35) #126 跨机首恢复：备份目录只有分类型归档时，按名恢复不得抛「暂无备份」');
+    {
+      const dir35 = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-t-126-'));
+      const home35 = path.join(dir35, 'home');
+      const root35 = `${home35}/Desktop/dsh-backups`;
+      const dsh35 = path.join(home35, '.dsh');
+      await fs.mkdir(path.join(dsh35, 'skills'), { recursive: true });
+      await fs.mkdir(path.join(dsh35, 'sessions'), { recursive: true });
+      await fs.writeFile(path.join(dsh35, 'skills', 'a.md'), 'SKILL-v1');
+      await fs.writeFile(path.join(dsh35, 'sessions', 's.log'), 'SESS-v1');
+      try {
+        const mock35 = makeCtx({ home: home35, dsh: dsh35 });
+        plugin(mock35.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        const run35 = mock35.handler;
+        // 只做一次分类型备份，然后**删掉所有全量归档**——复刻"新机首恢复：
+        // 用户从另一台机器只拷来一份分类型归档"的现场。
+        await run35('backup --types skills');
+        for (const n of await fs.readdir(root35)) {
+          if (n.startsWith('dsh-') && !n.startsWith('dsh-t-') && !n.startsWith('dsh-pre-') && n.endsWith('.tar.gz')) {
+            await fs.rm(path.join(root35, n));
+            await fs.rm(path.join(root35, `${n}.sha256`), { force: true });
+            await fs.rm(path.join(root35, `${n}.meta.json`), { force: true });
+          }
+        }
+        const typed35 = (await fs.readdir(root35)).find((n) => n.startsWith('dsh-t-') && n.endsWith('.tar.gz'));
+        ok(Boolean(typed35), `分类型归档已生成: ${typed35 ?? '(无)'}`);
+        const only35 = (await fs.readdir(root35)).filter((n) => n.endsWith('.tar.gz') && !n.startsWith('dsh-t-'));
+        ok(only35.length === 0, `现场前提：目录内已无全量归档（全量 ${only35.length} 份）`);
+        // 核心断言：按分类型归档名恢复不得报「暂无备份」
+        const dr35 = await run35(`restore ${typed35} --types skills --dry-run`);
+        ok(dr35.kind === 'success' && String(dr35.text).includes('分类型恢复预览'),
+          `仅分类型归档时 dry-run 可用: ${dr35.kind}/${String(dr35.text).replace(/\n/g, ' ').slice(0, 90)}`);
+        const rr35 = await run35(`restore ${typed35} --types skills`);
+        ok(rr35.kind === 'success' && String(rr35.text).includes('分类型恢复完成'),
+          `仅分类型归档时真实恢复可用: ${rr35.kind}/${String(rr35.text).replace(/\n/g, ' ').slice(0, 90)}`);
+        ok(await fs.readFile(path.join(dsh35, 'skills', 'a.md'), 'utf8') === 'SKILL-v1', '跨机首恢复后 skills 内容正确');
+        // 分类型归档不带 --types 时仍必须拒绝（整包恢复会丢其他类型）
+        const guard35 = await run35(`restore ${typed35}`);
+        ok(guard35.kind === 'error' && String(guard35.text).includes('分类型归档'),
+          `无 --types 的整包恢复仍被拦截: ${String(guard35.text).replace(/\n/g, ' ').slice(0, 80)}`);
+        // 面板路径（用户实际点击的入口，#126 截图即来自此处）：同一现场下
+        // backupPanel.restore 也必须可用，而不是回一句「暂无备份」。
+        const panel35 = mock35.services.find((s) => s.name === 'backupPanel');
+        await fs.writeFile(path.join(dsh35, 'skills', 'a.md'), 'SKILL-drifted');
+        const pDry35 = await panel35.restore(typed35, true, ['skills'], false);
+        ok(pDry35.ok === true && pDry35.dryRun === true,
+          `面板 restore dry-run 在仅分类型归档时可用: ok=${pDry35.ok} ${String(pDry35.summary ?? '').replace(/\n/g, ' ').slice(0, 80)}`);
+        const pReal35 = await panel35.restore(typed35, false, ['skills'], false);
+        ok(pReal35.ok === true && pReal35.dryRun === false && pReal35.merge === true,
+          `面板 restore 真实恢复可用: ok=${pReal35.ok} merge=${pReal35.merge} ${String(pReal35.summary ?? '').replace(/\n/g, ' ').slice(0, 80)}`);
+        ok(await fs.readFile(path.join(dsh35, 'skills', 'a.md'), 'utf8') === 'SKILL-v1', '面板恢复后 skills 内容正确');
+        const pGuard35 = await panel35.restore(typed35, false, undefined, false);
+        ok(pGuard35.ok === false && String(pGuard35.summary ?? '').includes('分类型归档'),
+          `面板整包恢复仍被拦截: ok=${pGuard35.ok} ${String(pGuard35.summary ?? '').replace(/\n/g, ' ').slice(0, 80)}`);
+      } finally {
+        await rmTemp(dir35);
+      }
+    }
+
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
   } finally {
