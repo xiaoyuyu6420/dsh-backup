@@ -830,6 +830,10 @@ async function sessionsRepair(root, dshHome, argv) {
     }
   }
   if (!maps.length && keep === undefined) throw new Error('sessions repair 至少需要 --map old=new 或 --keep <id>');
+  // --map 会**改写会话 header 里的 cwd**（动用户自己的日志），必须显式确认。
+  if (fix && maps.length && !argv.includes('--yes')) {
+    throw new Error('sessions repair --fix --map 会原地改写会话 header 的 cwd（动用户日志）——确认请加 --yes；不加 --fix 时仅预览');
+  }
 
   const files = [];
   await collectSessionLogs(`${dshHome}/sessions`, '', 0, files);

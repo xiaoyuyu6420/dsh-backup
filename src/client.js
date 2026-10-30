@@ -386,6 +386,8 @@ const selectorParam = { name: 'selector', wire: 'selector', source: 'json', code
 const dryRunParam = { name: 'dryRun', wire: 'dryRun', source: 'json', codec: strictCodec('dsh-backup/types#dryRun', z.boolean().optional()), acceptsUndefined: true };
 const syncDepsParam = { name: 'syncDeps', wire: 'syncDeps', source: 'json', codec: strictCodec('dsh-backup/types#syncDeps', z.boolean().optional()), acceptsUndefined: true };
 const hoursParam = { name: 'hours', wire: 'hours', source: 'json', codec: strictCodec('dsh-backup/types#hours', z.number().int().min(0).max(720)), acceptsUndefined: true };
+const tokenParam = { name: 'token', wire: 'token', source: 'json', codec: strictCodec('dsh-backup/types#token', z.string()), acceptsUndefined: false };
+const setGithubTokenSchema = z.object({ ok: z.boolean(), tokenSet: z.boolean().optional(), summary: z.string() });
 const repoParam = { name: 'repo', wire: 'repo', source: 'json', codec: strictCodec('dsh-backup/types#repo', z.string().optional()), acceptsUndefined: true };
 const typesParam = { name: 'types', wire: 'types', source: 'json', codec: strictCodec('dsh-backup/types#types', z.array(z.string()).optional()), acceptsUndefined: true };
 const passwordParam = { name: 'password', wire: 'password', source: 'json', codec: strictCodec('dsh-backup/types#password', z.string().optional()), acceptsUndefined: true };
@@ -434,6 +436,7 @@ export const BACKUP_REMOTE = Object.freeze({
     strictDescriptor('githubPull', [], githubPullSchema, true),
     strictDescriptor('removeEntry', [selectorParam], removeSchema, true),
     strictDescriptor('setGithubRepo', [repoParam], setGithubRepoSchema, false),
+    strictDescriptor('setGithubToken', [tokenParam], setGithubTokenSchema, false),
     strictDescriptor('checkUpdate', [], updateCheckSchema, true),
     strictDescriptor('update', [], updateSchema, true),
     strictDescriptor('exportConfig', [optionsParam], exportConfigSchema, true),

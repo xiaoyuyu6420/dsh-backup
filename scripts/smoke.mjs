@@ -2252,6 +2252,13 @@ async function main() {
         const meta38 = JSON.parse(await fs.readFile(`${env38.root}/${encName}.meta.json`, 'utf8'));
         ok(meta38.encrypted === true, '38 meta.encrypted=true');
 
+        // 38a2 流式加密的原子性：无临时文件残留、边车长度与实际密文一致
+        const rootFiles38 = await fs.readdir(env38.root);
+        ok(!rootFiles38.some((n) => /\.enc-.*\.tmp$/.test(n)), '38 加密后无 .enc-*.tmp 残留（原子替换）');
+        const encStat38 = await fs.stat(`${env38.root}/${encName}`);
+        const sidecar38 = JSON.parse(await fs.readFile(`${env38.root}/${encName}.encrypted.json`, 'utf8'));
+        ok(sidecar38.ciphertextSize === encStat38.size, `38 边车 ciphertextSize 与实际密文一致（${sidecar38.ciphertextSize}/${encStat38.size}）`);
+
         // 38b list 显示 encrypted/🔒
         const st38 = await panel38.status();
         ok(Array.isArray(st38.backups) && st38.backups.some((b) => b.name === encName && b.encrypted === true), '38 status.backups 标记 encrypted');
@@ -2267,6 +2274,24 @@ async function main() {
         const badR = await panel38.restore(undefined, false, undefined, undefined, 'wrong-pw');
         ok(badR.ok === false && String(badR.summary).includes('口令错误或归档已损坏'), `38 restore 口令错误给「口令错误或归档已损坏」: ${String(badR.summary).slice(0, 60)}`);
         ok(!/bad decrypt|EVP_|Unsupported state|node:internal/i.test(String(badR.summary)), '38 口令错误报错不含 raw crypto/stack 片段');
+        const afterBad38 = await fs.readdir(env38.root);
+        ok(!afterBad38.some((n) => /^\.decrypt-/.test(n)), '38 口令错误后无 .decrypt-* 半截明文残留');
+
+        // 38g 大文件流式往返（6MB，多块）+ 认证失败不留半截明文
+        const encMod38 = await import('../lib/encrypt.js');
+        const bigPath = path.join(env38.root, 'big.bin');
+        const bigCipher = path.join(env38.root, 'big.cipher.bin');
+        const bigBack = path.join(env38.root, 'big-back.bin');
+        const bigBad = path.join(env38.root, 'big-bad.bin');
+        await fs.writeFile(bigPath, Buffer.alloc(6 * 1024 * 1024, 9));
+        const encBig38 = await encMod38.encryptFile(bigPath, bigCipher, 'pw-big');
+        ok(encBig38.ciphertextSize === 6 * 1024 * 1024, '38g 6MB 流式加密密文长度与明文一致');
+        await encMod38.decryptFile(bigCipher, bigBack, encBig38.sidecar, 'pw-big');
+        ok((await fs.readFile(bigBack)).equals(await fs.readFile(bigPath)), '38g 6MB 流式解密往返一致');
+        let bigErr38 = null;
+        try { await encMod38.decryptFile(bigCipher, bigBad, encBig38.sidecar, 'nope'); } catch (e) { bigErr38 = e; }
+        ok(bigErr38 !== null && String(bigErr38.message).includes('口令错误或归档已损坏'), '38g 大文件口令错误给人话报错');
+        ok(!(await fs.stat(bigBad).then(() => true, () => false)), '38g 大文件口令错误不留半截明文');
 
         // 38e restore 正确口令 → 解密恢复成功、内容一致
         const realR = await panel38.restore(encName, false, undefined, undefined, 's3cret');
@@ -2730,7 +2755,10 @@ async function main() {
         const dry47 = r47(['sessions', 'repair', '--map', '/old/prefix=/new/prefix']);
         ok(dry47.status === 0 && dry47.stdout.includes('dry-run') && dry47.stdout.includes('/new/prefix/proj-a'), '47b sessions repair 默认 dry-run 出计划');
         ok((await fs.readFile(path.join(sessDir47, 'session.jsonl'), 'utf8')) === rawBody47, '47b dry-run 零写入（文件未变）');
-        const fix47 = r47(['sessions', 'repair', '--fix', '--map', '/old/prefix=/new/prefix']);
+        const noYes47 = r47(['sessions', 'repair', '--fix', '--map', '/old/prefix=/new/prefix']);
+        ok(noYes47.status !== 0 && String(noYes47.stderr).includes('--yes'), '47b --fix --map 不带 --yes 拒绝执行（防误改用户日志）');
+        ok((await fs.readFile(path.join(sessDir47, 'session.jsonl'), 'utf8')) === rawBody47, '47b 被拒时零写入');
+        const fix47 = r47(['sessions', 'repair', '--fix', '--map', '/old/prefix=/new/prefix', '--yes']);
         ok(fix47.status === 0 && fix47.stdout.includes('已修复'), '47b --fix 执行修复');
         const fixed47 = (await fs.readFile(path.join(sessDir47, 'session.jsonl'), 'utf8')).split('\n').filter(Boolean);
         ok(fixed47[0].includes('/new/prefix/proj-a') && !fixed47[0].includes('/old/prefix'), '47b 首行 cwd 已重写');
@@ -2742,7 +2770,7 @@ async function main() {
         await fs.mkdir(keepB, { recursive: true });
         await fs.writeFile(path.join(keepA, 'session.jsonl'), [hdr47('sess-keep', '/old/keep/proj-a'), ev47(0)].join('\n') + '\n');
         await fs.writeFile(path.join(keepB, 'session.jsonl'), [hdr47('sess-keep', '/old/keep/proj-b'), ev47(0)].join('\n') + '\n');
-        const keep47 = r47(['sessions', 'repair', '--fix', '--map', '/old/keep=/new/keep', '--keep', 'sess-keep']);
+        const keep47 = r47(['sessions', 'repair', '--fix', '--map', '/old/keep=/new/keep', '--keep', 'sess-keep', '--yes']);
         ok(keep47.status === 0, '47b --keep 执行');
         const keepARes = await fs.readFile(path.join(keepA, 'session.jsonl'), 'utf8');
         const keepBRes = await fs.readFile(path.join(keepB, 'session.jsonl'), 'utf8');

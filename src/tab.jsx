@@ -1370,6 +1370,14 @@ export function BackupTab({ panel, t }) {
                   >
                     {t('aboutCopy')}
                   </button>
+                  <a
+                    className="dsb-btn-secondary"
+                    href="https://github.com/xiaoyuyu6420/dsh-backup/issues/new"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t('aboutFeedback')}
+                  </a>
                 </div>
               </div>
 

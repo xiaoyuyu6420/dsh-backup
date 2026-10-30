@@ -98,6 +98,6 @@
   1. 分叉沿用 `isSeeded` 却缺 `session/end-seed` 标记时,宿主 `finish()` 判定会话打不开 → 分叉时统一修正(缺标记降级 / 多标记丢弃并重编号);
   2. 导入行 `time` 用 `mtimeMs`(小数)违反"safe integer" → 取整;
   3. 附带:surface 事件缺 `surfaceOp` 的分叉自动补 `'append'`。
-- [x] smoke 场景 53(11 项)、e2e 新增 7 项(chat 5 + rewind 宿主校验 2)全绿。
+- [x] smoke 场景 53(11 项)、e2e 新增 7 项(chat 5 + rewind 宿主校验 2 + Codex 4)全绿。
 
-最终验收:smoke **578/578**(Windows 565)、settings **47/47**、client **60/60**、真机 e2e **66/66**(DSH 0.2.1-rc.2)。
+最终验收:smoke **594/594**(Windows 581)、settings **47/47**、client **60/60**、真机 e2e **70/70**(DSH 0.2.1-rc.2)。
