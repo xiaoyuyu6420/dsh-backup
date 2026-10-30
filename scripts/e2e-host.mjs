@@ -20,8 +20,8 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { zstdCompressSync } from 'node:zlib';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.E2E_PORT || 13131);
@@ -34,6 +34,45 @@ let bootToken = '';
 let authCookie = '';
 const CK = () => (authCookie ? { Cookie: authCookie } : {});
 const req = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.headers || {}), ...CK() } });
+
+/**
+ * 宿主自身的格式解码器 + 表面投影:用来独立验证「我们写出的会话」真能被宿主读取,
+ * 而不是只过我们自己的容器校验。
+ */
+let hostModulesCache;
+async function hostFormatModules() {
+  if (hostModulesCache !== undefined) return hostModulesCache;
+  const pnpm = path.join(repoRoot, '.e2e-host', 'node_modules', '.pnpm');
+  const entry = (prefix, tail) => {
+    const dir = fs.readdirSync(pnpm).find((d) => d.startsWith(prefix));
+    if (!dir) throw new Error(`e2e 缺少宿主包 ${prefix}`);
+    return path.join(pnpm, dir, 'node_modules', ...tail);
+  };
+  const catalog = await import(pathToFileURL(entry('@deepseek-ai+dsh-session-format-catalog@', ['@deepseek-ai', 'dsh-session-format-catalog', 'lib', 'index.js'])).href);
+  const session = await import(pathToFileURL(entry('@deepseek-ai+dsh-session@', ['@deepseek-ai', 'dsh-session', 'lib', 'index.js'])).href);
+  hostModulesCache = { catalog, session };
+  return hostModulesCache;
+}
+
+/** 严格解码(宿主 recovery:'strict')+ 表面投影,返回 { events, roles, header }。 */
+async function decodeWithHost(filePath) {
+  const { catalog, session } = await hostFormatModules();
+  const raw = fs.readFileSync(filePath);
+  const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+  const cuts = [];
+  for (let at = raw.indexOf(magic, 0); at !== -1; at = raw.indexOf(magic, at + 4)) cuts.push(at);
+  const frames = cuts.map((start, i) => raw.subarray(start, i + 1 < cuts.length ? cuts[i + 1] : raw.length));
+  const lines = frames.flatMap((frame) => zstdDecompressSync(frame).toString('utf8').split('\n').filter((line) => line.length));
+  const restore = catalog.sessionFormatCatalog.createRestore(JSON.parse(lines[0]), { recovery: 'strict', validation: 'transformed' });
+  for (const line of lines.slice(1)) restore.decodeRow(JSON.parse(line));
+  const artifact = restore.finish();
+  const surface = session.foldSurface(artifact.events);
+  const bySeq = new Map(artifact.events.map((event) => [event.seq, event]));
+  const roles = surface.nodes
+    .map((seq) => session.deriveEventMessage(bySeq.get(seq), surface.projectedMessages)?.role)
+    .filter(Boolean);
+  return { events: artifact.events.length, roles, header: artifact.header };
+}
 
 /** 读取设置的用户层落点：≤0.1.6 在 settings.yaml，0.1.7+ 在 profile 覆盖文件。 */
 function readUserLayer() {
@@ -76,7 +115,7 @@ function startBoot() {
   bootLogStream = fs.createWriteStream(bootLogPath);
   bootProc = spawn('dsh', ['web', '--no-open'], {
     cwd: home,
-    // HOME 一并隔离：默认备份目的地（~/Desktop/dsh-backups）与 auto.json 都
+    // HOME 一并隔离：默认备份目的地（~/Desktop/DSH Backups）与 auto.json 都
     // 派生自 HOME——不隔离会把启动钩子的状态写进开发者真实备份目录
     // （实测污染事故，见 PR #30 讨论）。
     env: { ...process.env, DSH_HOME: home, HOME: home, USERPROFILE: home },
@@ -313,6 +352,14 @@ async function main() {
     }
     const bk = await rpc('backup');
     check('RPC backup 成功', bk?.ok === true, JSON.stringify(bk).slice(0, 160));
+    // 0.14.0：备份目录根要落一份人话版使用说明——用户第一次打开文件夹时的入口
+    check('备份目录写入 使用说明.txt（0.14.0）', (() => {
+      try {
+        return fs.readFileSync(path.join(home, 'bkdest', '使用说明.txt'), 'utf8').includes('【怎么恢复】');
+      } catch {
+        return false;
+      }
+    })());
 
     // 分类型备份：RPC 带 types → dsh-t- 子集归档 + status.typedBackups 可见
     fs.mkdirSync(path.join(home, 'skills'), { recursive: true });
@@ -428,7 +475,7 @@ async function main() {
     //    启动在默认目的地（HOME 已隔离），设置 destination 后迁移到 bkdest。
     const verOut = spawnSync('dsh', ['--version'], { encoding: 'utf8' });
     const cliVersion = (verOut.stdout || '').trim();
-    const defaultAuto = () => path.join(home, 'Desktop', 'dsh-backups', 'auto.json');
+    const defaultAuto = () => path.join(home, 'Desktop', 'DSH Backups', 'auto.json');
     const bkdestAuto = () => path.join(home, 'bkdest', 'auto.json');
     const readAuto = () => {
       for (const p of [defaultAuto(), bkdestAuto()]) {
@@ -482,7 +529,7 @@ async function main() {
           return `${p} → (${e.code})`;
         }
       };
-      console.error(`[e2e-host][debug] ${dumpDir(path.join(home, 'Desktop', 'dsh-backups'))}`);
+      console.error(`[e2e-host][debug] ${dumpDir(path.join(home, 'Desktop', 'DSH Backups'))}`);
       console.error(`[e2e-host][debug] ${dumpDir(bkdest)}`);
       try {
         const hits = fs.readFileSync(path.join(home, 'boot.log'), 'utf8')
@@ -574,6 +621,122 @@ async function main() {
       check('该归档清单超过 1 MiB（否则本段失去意义）', (listBig.stdout || '').length > (1 << 20), `listing=${(listBig.stdout || '').length}`);
       const rsBig = await rpc('restore', { selector: path.basename(bigPath), dryRun: true });
       check('大清单归档 dry-run 恢复通过（#119）', rsBig?.ok === true, JSON.stringify(rsBig).slice(0, 200));
+    }
+
+    // ---------- P2/P4：加密备份 / 会话 Rewind / 外部 agent 导入（真宿主） ----------
+    // 单参数方法（options）在 wire 上按参数名传：{ options: {...} }。
+    {
+      // 1) 加密备份：口令只经 RPC；list 标加密、verify 免口令、restore 错口令拒绝、对口令 dry-run 通过
+      const bkEnc = await rpc('backup', { password: 'e2e-pass-123' });
+      check('加密备份成功（encrypted=true）', bkEnc?.ok === true && bkEnc?.encrypted === true, JSON.stringify(bkEnc).slice(0, 160));
+      const encName = path.basename(String(bkEnc?.path ?? ''));
+      check('加密边车落盘', fs.existsSync(path.join(bkdest, `${encName}.encrypted.json`)));
+      const stEnc = await rpc('status');
+      check('status 列表标记 encrypted', (stEnc?.backups ?? []).some((b) => b.name === encName && b.encrypted === true), JSON.stringify(stEnc?.backups ?? []).slice(0, 200));
+      const vEnc = await rpc('verify', { selector: encName });
+      check('加密归档 verify 免口令可用', vEnc?.ok === true, JSON.stringify(vEnc).slice(0, 160));
+      const rNoPwd = await rpc('restore', { selector: encName, dryRun: true });
+      check('加密归档缺口令拒绝', rNoPwd?.ok === false && String(rNoPwd?.summary).includes('口令'), JSON.stringify(rNoPwd).slice(0, 160));
+      const rBadPwd = await rpc('restore', { selector: encName, dryRun: true, password: 'wrong' });
+      check('加密归档错口令拒绝（人话）', rBadPwd?.ok === false && String(rBadPwd?.summary).includes('口令错误'), JSON.stringify(rBadPwd).slice(0, 160));
+      const rOkPwd = await rpc('restore', { selector: encName, dryRun: true, password: 'e2e-pass-123' });
+      check('加密归档对口令 dry-run 通过', rOkPwd?.ok === true && rOkPwd?.dryRun === true, JSON.stringify(rOkPwd).slice(0, 160));
+
+      // 2) 会话 Rewind：造 v4 会话日志 → 预览 → 分叉 → 原会话零改动
+      const rwProject = path.join(home, 'sessions', '--e2e-rw--');
+      const rwDir = path.join(rwProject, 'sess-e2e-rw');
+      fs.mkdirSync(rwDir, { recursive: true });
+      const rwHeader = JSON.stringify({ type: 'session', version: 4, id: 'sess-e2e-rw', createdAt: 1724544000000, cwd: '/e2e-rw', delegationDepth: 0, isSeeded: true });
+      const rwRecs = [
+        JSON.stringify({ type: 'turn/start', seq: 0, time: 1000, data: { turn: 1 } }),
+        JSON.stringify({ type: 'step/start', seq: 1, time: 1000, data: { turn: 1, step: 1 } }),
+        JSON.stringify({ type: 'user/message', seq: 2, time: 1000, surfaceOp: 'append', data: { id: 'r0', role: 'user', content: [{ type: 'text', text: 'a' }], source: { kind: 'user' } } }),
+        JSON.stringify({ type: 'assistant/message', seq: 3, time: 2000, surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'r1', role: 'assistant', content: [{ type: 'text', text: 'b' }], source: { kind: 'model', provider: 'e2e', model: 'e2e' } }, stream: [] } }),
+        JSON.stringify({ type: 'user/message', seq: 4, time: 3000, surfaceOp: 'append', data: { id: 'r2', role: 'user', content: [{ type: 'text', text: 'c' }], source: { kind: 'user' } } }),
+      ];
+      const rwPath = path.join(rwDir, 'session.v4.jsonl.zstd');
+      const rwBuf = Buffer.concat([zstdCompressSync(`${rwHeader}\n`), zstdCompressSync(`${rwRecs.join('\n')}\n`)]);
+      fs.writeFileSync(rwPath, rwBuf);
+      const rwList = await rpc('sessionRewindList');
+      check('sessionRewindList 列出会话', (rwList?.sessions ?? []).some((s) => s.id === 'sess-e2e-rw'), JSON.stringify(rwList?.sessions ?? []).slice(0, 200));
+      const rwPrev = await rpc('sessionRewindPreview', { session: 'sess-e2e-rw', seq: 5 });
+      check('Rewind preview seq=5 (keep 5 drop 0)', rwPrev?.ok === true && rwPrev?.keepRecords === 5 && rwPrev?.dropRecords === 0, JSON.stringify(rwPrev).slice(0, 200));
+      const rwApply = await rpc('sessionRewindApply', { options: { session: 'sess-e2e-rw', seq: 5, confirm: true } });
+      check('Rewind 分叉执行', rwApply?.ok === true && typeof rwApply?.newId === 'string', JSON.stringify(rwApply).slice(0, 200));
+      check('Rewind 原会话字节零改动', fs.readFileSync(rwPath).equals(rwBuf));
+      check('Rewind 新会话目录存在', fs.existsSync(path.join(rwProject, String(rwApply?.newId ?? '__x__'))));
+      // 原会话 header 是 isSeeded 却缺 inherited 标记(旧数据常见):分叉必须被降级为普通会话,
+      // 否则宿主解码器 finish() 会直接判定会话打不开。
+      const rwHost = rwApply?.ok === true
+        ? await decodeWithHost(path.join(rwProject, String(rwApply.newId), 'session.v4.jsonl.zstd'))
+        : { events: -1, header: {} };
+      check('isSeeded 缺标记的分叉被降级且可被宿主解码', rwHost.events === 5 && rwHost.header?.isSeeded === false && rwHost.roles.join(',') === 'user,assistant,user', JSON.stringify(rwHost).slice(0, 200));
+
+      // 3) 外部 agent 导入：Claude Code 技能 + 全局指令（MCP 只报告）
+      const claudeDir = path.join(home, '.claude');
+      fs.mkdirSync(path.join(claudeDir, 'skills', 'demo'), { recursive: true });
+      fs.writeFileSync(path.join(claudeDir, 'skills', 'demo', 'SKILL.md'), '# e2e skill');
+      fs.writeFileSync(path.join(claudeDir, 'CLAUDE.md'), '# e2e instructions');
+      fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ mcpServers: { 'e2e-mcp': { command: 'node' } } }));
+      const fsList = await rpc('foreignSources');
+      check('foreignSources 检测到 Claude Code', (fsList?.sources ?? []).some((s) => s.id === 'claude-code' && s.detected === true && s.skills === 1), JSON.stringify(fsList?.sources ?? []).slice(0, 200));
+      const fsPrev = await rpc('foreignPreview', { options: { source: 'claude-code' } });
+      check('外部导入预览不写盘（demo 技能尚未落盘）', fsPrev?.ok === true && !fs.existsSync(path.join(home, 'skills', 'demo', 'SKILL.md')), JSON.stringify(fsPrev).slice(0, 160));
+      const fsApply = await rpc('foreignImport', { options: { source: 'claude-code', confirm: true } });
+      check('外部导入执行', fsApply?.ok === true, JSON.stringify(fsApply).slice(0, 160));
+      check('外部技能写入 ~/.dsh/skills', fs.existsSync(path.join(home, 'skills', 'demo', 'SKILL.md')));
+      check('外部全局指令写入 AGENTS.md', fs.existsSync(path.join(home, 'AGENTS.md')));
+
+      // 4) Claude Code 聊天记录导入 → 产物必须能被宿主解码器严格解码
+      const chatProj = path.join(home, '.claude', 'projects', '-e2e-chat');
+      fs.mkdirSync(chatProj, { recursive: true });
+      fs.writeFileSync(path.join(chatProj, 'chat-1.jsonl'), [
+        JSON.stringify({ type: 'user', timestamp: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: '你好' }] } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '你好！' }, { type: 'tool_use', id: 'toolu_e2e', name: 'Read', input: { file_path: '/tmp/x' } }] } }),
+        JSON.stringify({ type: 'user', timestamp: '2026-01-01T00:00:06.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_e2e', content: 'body' }] } }),
+      ].join('\n'));
+      const cSrc = await rpc('chatSources');
+      check('chatSources 检测到 Claude Code 会话', (cSrc?.sessions ?? []).length === 1 && cSrc?.sessions?.[0]?.messages === 3, JSON.stringify(cSrc).slice(0, 200));
+      const cPrev = await rpc('chatPreview', { options: { session: cSrc.sessions[0].id } });
+      check('chatPreview 预览 15 事件且不写盘', cPrev?.ok === true && cPrev?.events === 15 && cPrev?.dryRun === true, JSON.stringify(cPrev).slice(0, 200));
+      const cApply = await rpc('chatApply', { options: { session: cSrc.sessions[0].id, confirm: true } });
+      check('chatApply 导入为新会话', cApply?.ok === true && fs.existsSync(String(cApply?.path ?? '')), JSON.stringify(cApply).slice(0, 200));
+      const cHost = cApply?.ok === true ? await decodeWithHost(cApply.path) : { events: -1, roles: [] };
+      check('宿主解码器严格解码导入会话(15 事件)', cHost.events === 15, JSON.stringify(cHost).slice(0, 200));
+      check('宿主表面投影为 user/assistant/tool', cHost.roles.join(',') === 'user,assistant,tool', JSON.stringify(cHost.roles).slice(0, 160));
+
+      // 4b) Codex rollout → 新会话
+      const codexDir = path.join(home, '.codex', 'sessions', '2026', '10', '27');
+      fs.mkdirSync(codexDir, { recursive: true });
+      fs.writeFileSync(path.join(codexDir, 'rollout-2026-10-27T10-00-00-01a17b45-7a56-71c1-89ec-b09cb3b7bbd7.jsonl'), [
+        JSON.stringify({ timestamp: '2026-10-27T02:00:00.000Z', type: 'session_meta', payload: { id: 'x', cwd: '/tmp/codex-proj' } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'look at dir' }] } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:02.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:03.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{"cmd":["ls"]}', call_id: 'call_1' } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:04.000Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_1', output: 'a.txt' } }),
+      ].join('\n'));
+      const cSrc2 = await rpc('chatSources');
+      const codexMeta = (cSrc2?.sources ?? []).find((s) => s.id === 'codex');
+      check('chatSources 检出 Codex 会话', codexMeta?.detected === true && codexMeta?.count === 1, JSON.stringify(cSrc2?.sources ?? []).slice(0, 200));
+      const codexEntry = (cSrc2?.sessions ?? []).find((s) => s.source === 'codex');
+      const cApply2 = await rpc('chatApply', { options: { source: 'codex', session: codexEntry?.id, confirm: true } });
+      check('Codex 会话导入为新会话', cApply2?.ok === true && fs.existsSync(String(cApply2?.path ?? '')), JSON.stringify(cApply2).slice(0, 200));
+      const cHost2 = cApply2?.ok === true ? await decodeWithHost(cApply2.path) : { events: -1, roles: [] };
+      check('宿主严格解码 Codex 导入(16 事件)', cHost2.events === 16, JSON.stringify(cHost2).slice(0, 200));
+      check('宿主表面投影 Codex 消息', cHost2.roles.join(',') === 'user,assistant,tool', JSON.stringify(cHost2.roles).slice(0, 160));
+
+      // 5) seeded 会话分叉:修正 isSeeded 不变量后必须仍能被宿主打开
+      const seedDir = path.join(home, 'sessions', '--e2e-seed--', 'sess-seed');
+      fs.mkdirSync(seedDir, { recursive: true });
+      const seedHeader = JSON.stringify({ type: 'session', version: 4, id: 'sess-seed', createdAt: 1724544000000, cwd: '/e2e-seed', delegationDepth: 1, isSeeded: true });
+      const seedRows = [
+        JSON.stringify({ type: 'session/end-seed', seq: 0, time: 1000, data: { inherited: true } }),
+        JSON.stringify({ type: 'user/message', seq: 1, time: 2000, surfaceOp: 'append', data: { id: 's1', role: 'user', content: [{ type: 'text', text: 'seed' }], source: { kind: 'user' } } }),
+      ];
+      fs.writeFileSync(path.join(seedDir, 'session.v4.jsonl.zstd'), Buffer.concat([zstdCompressSync(`${seedHeader}\n`), zstdCompressSync(`${seedRows.join('\n')}\n`)]));
+      const seedFork = await rpc('sessionRewindApply', { options: { session: 'sess-seed', seq: 2, confirm: true } });
+      const seedHost = seedFork?.ok === true ? await decodeWithHost(seedFork.newPath) : { events: -1, roles: [] };
+      check('seeded 会话分叉保留标记且可被宿主严格解码', seedHost.events === 2 && seedHost.roles.join(',') === 'user' && seedHost.header?.isSeeded === true, JSON.stringify({ ok: seedFork?.ok, seedHost }).slice(0, 240));
     }
   }
 

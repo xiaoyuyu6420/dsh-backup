@@ -40,7 +40,7 @@ function ok(cond, msg) {
 async function mkTmpHome() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-backup-smoke-'));
   const home = path.join(dir, 'home');
-  const root = `${home}${path.sep}Desktop${path.sep}dsh-backups`;
+  const root = `${home}${path.sep}Desktop${path.sep}DSH Backups`;
   const dsh = path.join(home, '.dsh');
   await fs.mkdir(path.join(dsh, 'sessions'), { recursive: true });
   await fs.mkdir(path.join(dsh, 'node_modules', 'some-pkg'), { recursive: true });
@@ -81,7 +81,9 @@ function makeCtx({ home, dsh, env, fake, missing, settingsMode }) {
   const typertContribs = [];
   const services = [];
   const routes = [];
-  let tool = null;
+  // P4：宿主现在注册多个 agent 工具（backup_dsh + config_* 4 个）。按名存 Map，
+  // tool() 固定返回原始 backup_dsh——各场景的 execute({mode:...}) 都是它的契约。
+  const toolsByName = new Map();
 
   async function resolveExecutable(name) {
     // missing：模拟该外部命令不存在（Windows 无 sha256sum/shasum 的场景）
@@ -191,7 +193,7 @@ function makeCtx({ home, dsh, env, fake, missing, settingsMode }) {
     },
     subprocess: { resolveExecutable, spawn: spawnProc },
     commands: { register: (cmd) => handlers.set(cmd.name, cmd.handler) },
-    tools: { register: (t) => { tool = t; } },
+    tools: { register: (t) => { toolsByName.set(t.name, t); } },
     interval: (fn, ms) => {
       intervals.push({ fn, ms });
       return () => {};
@@ -252,7 +254,7 @@ function makeCtx({ home, dsh, env, fake, missing, settingsMode }) {
       }
     },
   };
-  return { ctx, intervals, timeouts, typertContribs, services, routes, handler: (raw, signal) => handlers.get('backup')({ rawInput: raw, signal }), tool: () => tool };
+  return { ctx, intervals, timeouts, typertContribs, services, routes, handler: (raw, signal) => handlers.get('backup')({ rawInput: raw, signal }), tool: () => toolsByName.get('backup_dsh'), toolByName: (name) => toolsByName.get(name) };
 }
 
 /** 启动宽限（AUTO_BOOT_GRACE_MS）：启动期的重活被有意推迟到 boot 窗口之外。
@@ -285,8 +287,8 @@ async function rmTemp(dir) {
 async function listArchives(root) {
   try {
     const names = await fs.readdir(root);
-    // 与插件 listBackups 一致：排除全部内部快照（pre-restore/pre-upgrade），只数用户可见备份
-    return names.filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-pre-restore-') && !n.startsWith('dsh-pre-upgrade-') && n.endsWith('.tar.gz')).sort().reverse();
+    // 与插件 listBackups 一致：排除全部内部快照（pre-restore/pre-upgrade/pre-import），只数用户可见备份
+    return names.filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-pre-restore-') && !n.startsWith('dsh-pre-upgrade-') && !n.startsWith('dsh-pre-import-') && n.endsWith('.tar.gz')).sort().reverse();
   } catch {
     return [];
   }
@@ -388,7 +390,7 @@ async function main() {
 
   const { dir, home, root, dsh } = await mkTmpHome();
   try {
-    const config = { destination: `~/Desktop/dsh-backups`, keep: 7 };
+    const config = { destination: `~/Desktop/DSH Backups`, keep: 7 };
     const mock = makeCtx({ home, dsh });
     plugin(mock.ctx, config);
     const run = mock.handler;
@@ -537,13 +539,13 @@ async function main() {
     const contrib = mock.typertContribs[0];
     ok(contrib !== undefined && contrib.package === 'dsh-backup' && contrib.face === 'host', 'typert 贡献已注册（host 面）');
     const endpoints = contrib ? contrib.invocations.map((d) => `${d.namespace}/${d.method}`) : [];
-    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair', 'backupPanel/migrateCheck', 'backupPanel/setGithubToken', 'backupPanel/checkUpdate', 'backupPanel/update']), `16 个端点齐全: ${endpoints.join(', ')}`);
+    ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/doctorScan', 'backupPanel/doctorRepair', 'backupPanel/migrateCheck', 'backupPanel/setGithubToken', 'backupPanel/checkUpdate', 'backupPanel/update', 'backupPanel/exportConfig', 'backupPanel/importPreview', 'backupPanel/importApply', 'backupPanel/syncStatus', 'backupPanel/syncNow', 'backupPanel/setSyncChannel', 'backupPanel/removeSyncChannel', 'backupPanel/lockStatus', 'backupPanel/reclaimLock', 'backupPanel/diskUsage', 'backupPanel/cleanup', 'backupPanel/setWeekly', 'backupPanel/about', 'backupPanel/profilesList', 'backupPanel/profileCreate', 'backupPanel/profileRename', 'backupPanel/profileDelete', 'backupPanel/profileLaunch', 'backupPanel/profileStop', 'backupPanel/marketList', 'backupPanel/marketSearch', 'backupPanel/marketInstall', 'backupPanel/foreignSources', 'backupPanel/foreignPreview', 'backupPanel/foreignImport', 'backupPanel/sessionRewindList', 'backupPanel/sessionRewindPreview', 'backupPanel/sessionRewindApply', 'backupPanel/chatSources', 'backupPanel/chatPreview', 'backupPanel/chatApply']), `47 个端点齐全: ${endpoints.join(', ')}`);
     ok(contrib && contrib.invocations.every((d) => d.service === 'backupPanel' && d.result.mode === 'src-json'), '描述符 service/result codec 正确');
     const panel = mock.services.find((s) => s.name === 'backupPanel');
     ok(panel !== undefined, 'backupPanel 服务已挂载');
     if (panel) {
       const snap = await panel.status();
-      ok(snap.destination.includes('Desktop/dsh-backups') && snap.dshHome.endsWith('/.dsh') && Number.isInteger(snap.keepDefault), `status 快照: dest=${snap.destination}`);
+      ok(snap.destination.includes('Desktop/DSH Backups') && snap.dshHome.endsWith('/.dsh') && Number.isInteger(snap.keepDefault), `status 快照: dest=${snap.destination}`);
       ok(Array.isArray(snap.backups) && snap.backups.length === 3 && typeof snap.backups[0].size === 'number', `快照含 ${snap.backups.length} 份备份与大小`);
       const vb = await panel.backup(undefined, undefined);
       ok(vb.ok === true && typeof vb.path === 'string' && vb.path.endsWith('.tar.gz'), `面板 backup 成功: ${vb.path.split('/').pop()}`);
@@ -610,7 +612,7 @@ async function main() {
     plugin(mock3.ctx, { destination: config.destination, githubRepo: ghBare.split(path.sep).join('/') });
     const rSync1 = await mock3.handler('');
     ok(rSync1.kind === 'success' && rSync1.text.includes('备份完成'), `备份成功（githubRepo 已配置）: ${rSync1.kind === 'success' ? '' : rSync1.text.replace(/\n/g, ' ').slice(0, 200)}`);
-    const syncDir2 = path.join(home, 'Desktop', 'dsh-backups', '.github-sync');
+    const syncDir2 = path.join(home, 'Desktop', 'DSH Backups', '.github-sync');
     ok(await fs.stat(path.join(syncDir2, '.git')).then(() => true, () => false), '同步工作树已初始化');
     const bareLog = await gitOut(['--git-dir', ghBare, 'log', '--oneline', '-1']);
     ok(bareLog.includes('backup'), `bare 仓库存在同步提交: ${bareLog}`);
@@ -823,7 +825,7 @@ async function main() {
       const env16 = await mkTmpHome();
       try {
         const mock16 = makeCtx({ home: env16.home, dsh: env16.dsh });
-        plugin(mock16.ctx, { destination: `~/Desktop/dsh-backups` });
+        plugin(mock16.ctx, { destination: `~/Desktop/DSH Backups` });
         const r16 = await mock16.handler('');
         ok(r16.kind === 'success', '脱敏备份成功');
         const arch16 = (await listArchives(env16.root))[0];
@@ -867,7 +869,7 @@ async function main() {
         await fs.mkdir(path.join(env17.dsh, 'profiles', 'web'), { recursive: true });
         await fs.writeFile(path.join(env17.dsh, 'profiles', 'web', 'package.json'), '{"dependencies":{"some-plugin":"^1.0.0"}}');
         const mockA = makeCtx({ home: env17.home, dsh: env17.dsh });
-        plugin(mockA.ctx, { destination: `~/Desktop/dsh-backups` });
+        plugin(mockA.ctx, { destination: `~/Desktop/DSH Backups` });
         await mockA.handler('');
         // “新机器”：同一备份目录，不同 home —— meta.home 不一致触发跨机提示
         const homeB = path.join(env17.dir, 'home-b');
@@ -894,7 +896,7 @@ async function main() {
           c.on('close', resolve);
         });
         const mockOld = makeCtx({ home: env18.home, dsh: env18.dsh });
-        plugin(mockOld.ctx, { destination: `~/Desktop/dsh-backups`, githubRepo: ghBare18.split(path.sep).join('/') });
+        plugin(mockOld.ctx, { destination: `~/Desktop/DSH Backups`, githubRepo: ghBare18.split(path.sep).join('/') });
         await mockOld.handler('');
         const pushed18 = (await listArchives(env18.root)).slice();
         ok(pushed18.length === 1, '旧机器已推送 1 份');
@@ -921,7 +923,7 @@ async function main() {
     console.log('19) RPC 方法名保留字预检（#2 事故防复发，issue #9）');
     const contrib19 = mock.typertContribs[0];
     const methods19 = contrib19 ? contrib19.invocations.map((d) => d.method) : [];
-    ok(methods19.length === 16, `注册了 ${methods19.length} 个 RPC 方法（期望 16）`);
+    ok(methods19.length === 47, `注册了 ${methods19.length} 个 RPC 方法（期望 47）`);
     let reservedHit = null;
     for (const name of methods19) {
       try { assertPanelMethodAvailable('backupPanel', name); } catch { reservedHit = name; }
@@ -977,7 +979,14 @@ async function main() {
           await fs.mkdir(path.join(sessDir, dirName), { recursive: true });
           await fs.writeFile(path.join(sessDir, dirName, fileName), content);
         }
+        // #131 回归：归档里也有一份「附件对象」，活树里同名文件内容不同——
+        // 定点修复只能替换会话目标文件，绝不能把附件对象一起覆盖（Windows
+        // bsdtar 还会因同名对象直接拒绝提取）。
+        const attachRel = 'attachments/v1/objects/aa/deadbeef';
+        await fs.mkdir(path.join(env20.dsh, 'attachments', 'v1', 'objects', 'aa'), { recursive: true });
+        await fs.writeFile(path.join(env20.dsh, attachRel), 'ARCHIVE-ORIGINAL');
         ok((await mock20.tool().execute({ mode: 'backup' }, {})).ok === true, 'doctor 场景备份成功');
+        await fs.writeFile(path.join(env20.dsh, attachRel), 'LIVE-VERSION');
 
         // 弄坏八个现场：坏魔数 / 截断帧 / 单帧重写（#1047 形态）/ 首帧尾随空行 /
         // 首帧前导空行 / 首帧缺行尾 / skippable 前导帧（宿主一律拒载）/ seq 跳号
@@ -1032,6 +1041,9 @@ async function main() {
           ok(await fs.readFile(path.join(sessDir, 'enc-skip', 'session.jsonl.zstd')).then((b) => b.equals(good)), 'skippable 前导文件已还原为健康字节');
         }
         ok(await fs.readFile(path.join(sessDir, 'raw-gap', 'session.jsonl'), 'utf8').then((t) => t === rawGood.toString('utf8')), 'seq 跳号文件已还原');
+        ok(await fs.readFile(path.join(env20.dsh, attachRel), 'utf8').then((t) => t === 'LIVE-VERSION', () => false), '#131 定点修复不覆盖非目标文件（附件对象保持活树内容）');
+        const stageLeft = (await fs.readdir(env20.root)).filter((n) => n.startsWith('.repair-stage-'));
+        ok(stageLeft.length === 0, `#131 修复暂存目录已清理（无 .repair-stage-* 残留，实际 ${stageLeft.length}）`);
         let keptCount = 0;
         for (const dirName of repairTargets) {
           const names = await fs.readdir(path.join(sessDir, dirName));
@@ -1118,6 +1130,7 @@ async function main() {
         const rescueFile = path.join(env23.root, 'rescue.mjs');
         ok(await fs.stat(rescueFile).then(() => true, () => false), 'rescue.mjs 已随备份落盘');
         ok(await fs.readFile(path.join(env23.root, 'RESCUE.txt'), 'utf8').then((t) => t.includes('双击'), () => false), 'RESCUE.txt 引导双击');
+        ok(await fs.readFile(path.join(env23.root, '使用说明.txt'), 'utf8').then((t) => t.includes('【怎么恢复】') && t.includes('【里面的文件都是什么】'), () => false), '使用说明.txt 人话版说明落盘（0.14.0）');
         const launcherName = process.platform === 'win32' ? '点我恢复.bat' : process.platform === 'darwin' ? '点我恢复.command' : '点我恢复.sh';
         ok(await fs.stat(path.join(env23.root, launcherName)).then(() => true, () => false), `双击启动器已生成（${launcherName}）`);
 
@@ -1323,7 +1336,7 @@ async function main() {
     {
       const tdir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-typed-'));
       const thome = path.join(tdir, 'home');
-      const troot = `${thome}/Desktop/dsh-backups`;
+      const troot = `${thome}/Desktop/DSH Backups`;
       const tdsh = path.join(thome, '.dsh');
       await fs.mkdir(path.join(tdsh, 'skills'), { recursive: true });
       await fs.mkdir(path.join(tdsh, 'sessions'), { recursive: true });
@@ -1339,7 +1352,7 @@ async function main() {
       await fs.writeFile(path.join(tdsh, 'node_modules', 'x', 'j.js'), 'junk');
       try {
         const tmock = makeCtx({ home: thome, dsh: tdsh });
-        plugin(tmock.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        plugin(tmock.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
         const trun = tmock.handler;
         const typedNames = async () => (await fs.readdir(troot)).filter((n) => n.startsWith('dsh-t-') && n.endsWith('.tar.gz')).sort();
         const fullNames = async () => (await fs.readdir(troot)).filter((n) => n.startsWith('dsh-') && !n.startsWith('dsh-t-') && !n.startsWith('dsh-pre-') && n.endsWith('.tar.gz')).sort();
@@ -1399,7 +1412,7 @@ async function main() {
     {
       const mdir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-merge-'));
       const mhome = path.join(mdir, 'home');
-      const mroot = `${mhome}/Desktop/dsh-backups`;
+      const mroot = `${mhome}/Desktop/DSH Backups`;
       const mdsh = path.join(mhome, '.dsh');
       await fs.mkdir(path.join(mdsh, 'skills'), { recursive: true });
       await fs.mkdir(path.join(mdsh, 'sessions'), { recursive: true });
@@ -1408,7 +1421,7 @@ async function main() {
       await fs.writeFile(path.join(mdsh, 'settings.yaml'), 'k: orig');
       try {
         const mmock = makeCtx({ home: mhome, dsh: mdsh });
-        plugin(mmock.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        plugin(mmock.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
         const mrun = mmock.handler;
         await mrun('');
         const fullAr = (await fs.readdir(mroot)).find((n) => n.startsWith('dsh-') && !n.startsWith('dsh-t-') && !n.startsWith('dsh-pre-') && n.endsWith('.tar.gz'));
@@ -1442,12 +1455,12 @@ async function main() {
     {
       const gdir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-migrate-'));
       const ghome = path.join(gdir, 'home');
-      const groot = `${ghome}/Desktop/dsh-backups`;
+      const groot = `${ghome}/Desktop/DSH Backups`;
       const gdsh = path.join(ghome, '.dsh');
       await fs.mkdir(path.join(gdsh, 'sessions', '--proj--'), { recursive: true });
       try {
         const gmock = makeCtx({ home: ghome, dsh: gdsh });
-        plugin(gmock.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        plugin(gmock.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
         const sessDir = path.join(gdsh, 'sessions', '--proj--');
         const zc = typeof zlib.zstdCompressSync === 'function' ? (t) => zlib.zstdCompressSync(t) : () => Buffer.from('placeholder');
         const hdr = (v, id) => JSON.stringify({ type: 'session', version: v, id, createdAt: 1724544000000, delegationDepth: 0 });
@@ -1612,7 +1625,7 @@ async function main() {
       const envE = await mkTmpHome();
       try {
         const mockE = makeCtx({ home: envE.home, dsh: envE.dsh, env: { DSH_HOME: `${envE.dsh}/` } });
-        plugin(mockE.ctx, { destination: `~/Desktop/dsh-backups`, keep: 7 });
+        plugin(mockE.ctx, { destination: `~/Desktop/DSH Backups`, keep: 7 });
         const rE = await mockE.handler('');
         ok(rE.kind === 'success', `尾斜杠 DSH_HOME /backup 成功: ${rE.kind === 'success' ? rE.text.split('\n')[0] : rE.text}`);
         const archE = await listArchives(envE.root);
@@ -1638,7 +1651,7 @@ async function main() {
         dsh: env29.dsh,
         fake: { dsh: [process.execPath, path.join(REPO, 'scripts', 'fixtures', 'fake-dsh.mjs'), logPath] },
       });
-      plugin(mock29.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+      plugin(mock29.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
       const run29 = mock29.handler;
       try {
         // (a) 有新版：registry 返回 9.9.9 → 检查可见、一键更新走 dsh CLI、快照先留
@@ -1953,7 +1966,7 @@ async function main() {
       const env33 = await mkTmpHome();
       try {
         const mock33 = makeCtx({ home: env33.home, dsh: env33.dsh });
-        plugin(mock33.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        plugin(mock33.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
         const sessDir = path.join(env33.dsh, 'sessions', '--v4--');
         const hasZstd33 = typeof zlib.zstdCompressSync === 'function';
         const zc33 = hasZstd33 ? (t) => zlib.zstdCompressSync(t) : () => Buffer.from('placeholder');
@@ -2011,7 +2024,7 @@ async function main() {
       const env34 = await mkTmpHome();
       try {
         const mock34 = makeCtx({ home: env34.home, dsh: env34.dsh });
-        plugin(mock34.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        plugin(mock34.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
         const sha34 = (b) => createHash('sha256').update(b).digest('hex');
         await fs.mkdir(env34.root, { recursive: true }); // 备份目的地此时还没被创建过
         // 2 万个 ~90 字节名字的条目（模拟附件/内容寻址账本这类大树）→ 清单远超 1 MiB
@@ -2044,7 +2057,7 @@ async function main() {
     {
       const dir35 = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-t-126-'));
       const home35 = path.join(dir35, 'home');
-      const root35 = `${home35}/Desktop/dsh-backups`;
+      const root35 = `${home35}/Desktop/DSH Backups`;
       const dsh35 = path.join(home35, '.dsh');
       await fs.mkdir(path.join(dsh35, 'skills'), { recursive: true });
       await fs.mkdir(path.join(dsh35, 'sessions'), { recursive: true });
@@ -2052,7 +2065,7 @@ async function main() {
       await fs.writeFile(path.join(dsh35, 'sessions', 's.log'), 'SESS-v1');
       try {
         const mock35 = makeCtx({ home: home35, dsh: dsh35 });
-        plugin(mock35.ctx, { destination: '~/Desktop/dsh-backups', keep: 7 });
+        plugin(mock35.ctx, { destination: '~/Desktop/DSH Backups', keep: 7 });
         const run35 = mock35.handler;
         // 只做一次分类型备份，然后**删掉所有全量归档**——复刻"新机首恢复：
         // 用户从另一台机器只拷来一份分类型归档"的现场。
@@ -2096,6 +2109,1031 @@ async function main() {
           `面板整包恢复仍被拦截: ok=${pGuard35.ok} ${String(pGuard35.summary ?? '').replace(/\n/g, ' ').slice(0, 80)}`);
       } finally {
         await rmTemp(dir35);
+      }
+    }
+
+    console.log('36) 0.14.0 旧默认目录改名边界：基本改名 / 目标已存在 / rename 失败兜底 / 显式配置不动');
+    // 36a 基本：未配置 destination → 旧默认目录同盘改名，内容原样保留（迁移矩阵第 1 行）
+    {
+      const env36 = await mkTmpHome();
+      const legacy36 = `${env36.home}/Desktop/dsh-backups`;
+      const target36 = `${env36.home}/Desktop/DSH Backups`;
+      try {
+        await fs.mkdir(legacy36, { recursive: true });
+        await fs.writeFile(path.join(legacy36, 'sentinel.txt'), 'old-backup');
+        const mock36 = makeCtx({ home: env36.home, dsh: env36.dsh });
+        plugin(mock36.ctx, {});
+        let moved = false;
+        for (let i = 0; i < 100 && !moved; i += 1) {
+          await new Promise((r) => setTimeout(r, 25));
+          moved = await fs.stat(path.join(target36, 'sentinel.txt')).then(() => true, () => false);
+        }
+        ok(moved, '36a 从未配置过 destination 的用户：旧默认目录自动改名为 DSH Backups，内容原样保留');
+        ok(await fs.stat(legacy36).then(() => false, () => true), '36a 旧目录不再存在（没有新旧两份并存）');
+      } finally {
+        await rmTemp(env36.dir);
+      }
+    }
+
+    // 36b 目标已存在：新旧目录并存时不合并、不覆盖，继续用新目录，旧目录原样保留
+    {
+      const envB = await mkTmpHome();
+      const legacyB = `${envB.home}/Desktop/dsh-backups`;
+      const targetB = `${envB.home}/Desktop/DSH Backups`;
+      try {
+        await fs.mkdir(legacyB, { recursive: true });
+        await fs.mkdir(targetB, { recursive: true });
+        await fs.writeFile(path.join(legacyB, 'legacy.txt'), 'legacy');
+        await fs.writeFile(path.join(targetB, 'new.txt'), 'new');
+        const mockB = makeCtx({ home: envB.home, dsh: envB.dsh });
+        plugin(mockB.ctx, {});
+        await new Promise((r) => setTimeout(r, 300)); // 等迁移尝试落定（目标已存在 → 直接跳过）
+        ok(await fs.stat(path.join(legacyB, 'legacy.txt')).then(() => true, () => false), '36b 旧目录原样保留（未改名）');
+        ok(await fs.stat(path.join(targetB, 'new.txt')).then(() => true, () => false), '36b 新目录原样保留');
+        ok(await fs.stat(path.join(targetB, 'legacy.txt')).then(() => false, () => true), '36b 旧目录内容未被合并进新目录（不静默合并）');
+        const rB = await mockB.handler('');
+        ok(rB.kind === 'success', '36b 目标已存在时备份仍成功');
+        ok((await listArchives(targetB)).length === 1 && (await listArchives(legacyB)).length === 0, '36b 备份落进新目录（继续用新默认目录）');
+      } finally {
+        await rmTemp(envB.dir);
+      }
+    }
+
+    // 36c rename 失败兜底：改名失败时 paths() 继续用旧目录，已有备份不"消失"。
+    // 注入手段：把父目录（Desktop）改为只读 → rename 必然 EACCES。POSIX 专属，
+    // Windows 无等价无副作用手段；且要求非 root 运行（root 无视权限位）。
+    if (!IS_WIN) {
+      const envC = await mkTmpHome();
+      const legacyC = `${envC.home}/Desktop/dsh-backups`;
+      const targetC = `${envC.home}/Desktop/DSH Backups`;
+      const desktopC = `${envC.home}/Desktop`;
+      try {
+        await fs.mkdir(legacyC, { recursive: true });
+        await fs.writeFile(path.join(legacyC, 'sentinel.txt'), 'legacy-kept');
+        await fs.chmod(desktopC, 0o555); // 只读父目录 → rename 失败
+        const mockC = makeCtx({ home: envC.home, dsh: envC.dsh });
+        plugin(mockC.ctx, {});
+        await new Promise((r) => setTimeout(r, 400)); // 等迁移尝试（失败）落定
+        ok(await fs.stat(path.join(legacyC, 'sentinel.txt')).then(() => true, () => false), '36c rename 失败后旧目录仍在（内容未丢）');
+        ok(await fs.stat(targetC).then(() => false, () => true), '36c 新目录未出现（改名确实失败）');
+        const rC = await mockC.handler('');
+        ok(rC.kind === 'success', '36c rename 失败后备份仍成功（兜底继续用旧目录）');
+        ok((await listArchives(legacyC)).length === 1, '36c 备份落进旧目录');
+        const panelC = mockC.services.find((s) => s.name === 'backupPanel');
+        ok(panelC !== undefined, '36c backupPanel 服务已挂载');
+        if (panelC) {
+          const snapC = await panelC.status();
+          ok(String(snapC.destination).includes('dsh-backups'), `36c status.destination 指向旧目录: ${snapC.destination}`);
+        }
+      } finally {
+        await fs.chmod(desktopC, 0o755).catch(() => {});
+        await rmTemp(envC.dir);
+      }
+    } else {
+      console.log('  ⏭️  36c（rename 失败兜底）依赖 POSIX 只读父目录注入，Windows 跳过');
+    }
+
+    // 36d 显式配置过 destination：一律不碰旧默认目录，备份落进用户指定的目录
+    {
+      const envD = await mkTmpHome();
+      const legacyD = `${envD.home}/Desktop/dsh-backups`;
+      const targetD = `${envD.home}/Desktop/DSH Backups`;
+      const customD = `${envD.home}/Desktop/custom-backups`;
+      try {
+        await fs.mkdir(legacyD, { recursive: true });
+        await fs.writeFile(path.join(legacyD, 'sentinel.txt'), 'legacy-untouched');
+        const mockD = makeCtx({ home: envD.home, dsh: envD.dsh });
+        plugin(mockD.ctx, { destination: '~/Desktop/custom-backups' });
+        await new Promise((r) => setTimeout(r, 300));
+        ok(await fs.stat(path.join(legacyD, 'sentinel.txt')).then(() => true, () => false), '36d 旧默认目录未被改名');
+        ok(await fs.stat(targetD).then(() => false, () => true), '36d 新默认目录未出现（显式配置不动）');
+        const rD = await mockD.handler('');
+        ok(rD.kind === 'success', '36d 显式 destination 备份成功');
+        ok((await listArchives(customD)).length === 1, '36d 备份落进显式配置的目录');
+        ok((await listArchives(legacyD)).length === 0, '36d 旧默认目录未写入任何归档');
+      } finally {
+        await rmTemp(envD.dir);
+      }
+    }
+
+    console.log('37) 旧设置 redact:\'none\' 归一化为 off（凭据明文进归档，不回退）');
+    {
+      const env37 = await mkTmpHome();
+      try {
+        const mock37 = makeCtx({ home: env37.home, dsh: env37.dsh });
+        plugin(mock37.ctx, { redact: 'none' });
+        const r37 = await mock37.handler('');
+        ok(r37.kind === 'success', `37 redact:'none' 配置下备份成功: ${r37.kind === 'success' ? '' : r37.text}`);
+        const arch37 = (await listArchives(env37.root))[0];
+        const entries37 = await tarList(env37.root, arch37);
+        ok(entries37.some((e) => e.includes('.credentials.yaml')), "37 redact:'none' → 凭据明文进归档（等价 'off'）");
+        ok(await fs.stat(`${env37.root}/${arch37}.redacted.json`).then(() => false, () => true), '37 未写 .redacted.json（无脱敏清单）');
+        const meta37 = JSON.parse(await fs.readFile(`${env37.root}/${arch37}.meta.json`, 'utf8'));
+        ok(meta37.redacted === 0, '37 meta.redacted=0');
+      } finally {
+        await rmTemp(env37.dir);
+      }
+    }
+
+    console.log('38) 可选口令加密：list 显示 🔒 / verify 免口令 / restore 口令错误人话 / 密文·口令不落盘');
+    {
+      const env38 = await mkTmpHome();
+      try {
+        const mock38 = makeCtx({ home: env38.home, dsh: env38.dsh });
+        plugin(mock38.ctx, {});
+        const panel38 = mock38.services.find((s) => s.name === 'backupPanel');
+        ok(panel38 !== undefined, '38 backupPanel 服务已挂载');
+
+        // 38a 加密备份（口令只经面板 RPC 内存态传入）
+        const rEnc = await panel38.backup(undefined, undefined, 's3cret');
+        ok(rEnc.ok === true && rEnc.encrypted === true && typeof rEnc.path === 'string', '38 加密备份成功且 encrypted=true');
+        const encName = String(rEnc.path).split('/').pop();
+        ok(await fs.stat(`${env38.root}/${encName}.encrypted.json`).then(() => true, () => false), '38 .encrypted.json 边车存在');
+        const meta38 = JSON.parse(await fs.readFile(`${env38.root}/${encName}.meta.json`, 'utf8'));
+        ok(meta38.encrypted === true, '38 meta.encrypted=true');
+
+        // 38b list 显示 encrypted/🔒
+        const st38 = await panel38.status();
+        ok(Array.isArray(st38.backups) && st38.backups.some((b) => b.name === encName && b.encrypted === true), '38 status.backups 标记 encrypted');
+        const list38 = await mock38.handler('list');
+        ok(list38.kind === 'success' && list38.text.includes('🔒') && list38.text.includes(encName), '38 /backup list 显示 🔒');
+
+        // 38c verify 免口令（sha256 算的是密文，完整性校验不需要口令）
+        const vv38 = await panel38.verify('all', undefined);
+        ok(vv38.ok === true && Array.isArray(vv38.results) && vv38.results.length > 0 && vv38.results.every((r) => r.ok), '38 verify all 免口令通过');
+        ok(String(vv38.summary).includes('加密归档：完整性校验无需口令'), '38 verify 提示「完整性校验无需口令」');
+
+        // 38d restore 口令错误 → 人话报错（不泄露 raw crypto 异常）
+        const badR = await panel38.restore(undefined, false, undefined, undefined, 'wrong-pw');
+        ok(badR.ok === false && String(badR.summary).includes('口令错误或归档已损坏'), `38 restore 口令错误给「口令错误或归档已损坏」: ${String(badR.summary).slice(0, 60)}`);
+        ok(!/bad decrypt|EVP_|Unsupported state|node:internal/i.test(String(badR.summary)), '38 口令错误报错不含 raw crypto/stack 片段');
+
+        // 38e restore 正确口令 → 解密恢复成功、内容一致
+        const realR = await panel38.restore(encName, false, undefined, undefined, 's3cret');
+        ok(realR.ok === true && realR.dryRun === false, '38 restore 正确口令真实恢复通过');
+        ok(await fs.readFile(path.join(env38.dsh, 'settings.json'), 'utf8') === '{"a":1}', '38 正确口令解密后内容一致');
+
+        // 38f 密文/口令不进日志、不进 settings.yaml / auto.json / 边车 / 归档
+        const sidecarText = await fs.readFile(`${env38.root}/${encName}.encrypted.json`, 'utf8');
+        ok(!sidecarText.includes('s3cret'), '38 口令不进 .encrypted.json 边车');
+        const autoText = await fs.readFile(`${env38.root}/auto.json`, 'utf8').catch(() => '');
+        ok(!autoText.includes('s3cret'), '38 口令不进 auto.json');
+        const encBytes = await fs.readFile(`${env38.root}/${encName}`);
+        ok(!encBytes.toString('latin1').includes('s3cret'), '38 口令不进归档密文');
+        ok((await tarList(env38.root, encName)).length === 0, '38 归档是密文（tar 无法直接列出，密文覆盖 tar.gz 本体）');
+        ok(!String(rEnc.summary).includes('s3cret') && !JSON.stringify(st38).includes('s3cret'), '38 备份回执与状态快照均不回显口令');
+      } finally {
+        await rmTemp(env38.dir);
+      }
+    }
+
+    console.log('39) 导出/导入单文件 ZIP：export → importPreview 节段/冲突 → importApply keep/overwrite + 快照');
+    {
+      const env39 = await mkTmpHome();
+      try {
+        // 导出 ZIP 落进备份目录根：先确保目录存在（等价于真实链路里已做过一次备份）。
+        // 否则 exportConfig 在目录缺失时对 .export-*.tmp.zip 的 createWriteStream 会
+        // 抛未捕获 ENOENT——这是宿主的潜在边界（见回报给 lead 的说明），测试先按真实
+        // 前置条件铺好目录，不掩盖该问题的同时让其余断言可跑。
+        await fs.mkdir(env39.root, { recursive: true });
+        const mock39 = makeCtx({ home: env39.home, dsh: env39.dsh });
+        plugin(mock39.ctx, {});
+        const panel39 = mock39.services.find((s) => s.name === 'backupPanel');
+        ok(panel39 !== undefined, '39 backupPanel 服务已挂载');
+
+        // 39a 导出（未加密，默认脱敏凭据）
+        const exp = await panel39.exportConfig({});
+        ok(exp.ok === true && exp.encrypted === false && typeof exp.path === 'string' && typeof exp.name === 'string', '39 导出成功（未加密）');
+        ok(String(exp.name).startsWith('dsh-config-') && String(exp.name).endsWith('.zip'), `39 导出命名 dsh-config-*.zip: ${exp.name}`);
+        ok(await fs.stat(exp.path).then(() => true, () => false), '39 导出 ZIP 落盘');
+        ok(exp.manifest && exp.manifest.format === 'dsh-config-export' && Array.isArray(exp.manifest.sections), '39 manifest 格式正确并含节段');
+        ok(Array.isArray(exp.redactedFiles) && exp.redactedFiles.includes('.credentials.yaml'), '39 默认脱敏 .credentials.yaml（不进 ZIP）');
+
+        // 39b 导入预览（dry-run，只读）
+        const prev = await panel39.importPreview({ sourcePath: exp.path });
+        ok(prev.ok === true && prev.encrypted === false && Array.isArray(prev.sections) && prev.totalFiles > 0, `39 importPreview 出节段（${prev.totalFiles} 文件 / ${prev.sections?.length} 节段）`);
+        ok(typeof prev.compatibility?.score === 'number' && prev.compatibility?.score > 0, '39 兼容性评分存在');
+        ok(prev.sections.some((s) => s.key === 'settings') && prev.sections.some((s) => s.key === 'sessions'), '39 节段含 settings + sessions');
+
+        // 39c 制造冲突：改 settings.json + 删 sessions/s1.log
+        await fs.writeFile(path.join(env39.dsh, 'settings.json'), '{"a":2}');
+        await fs.rm(path.join(env39.dsh, 'sessions', 's1.log'));
+        const prevC = await panel39.importPreview({ sourcePath: exp.path });
+        ok(Array.isArray(prevC.conflicts) && prevC.conflicts.some((c) => c.name === 'settings.json'), '39 importPreview 检出 settings.json 冲突');
+
+        // 39d 导入应用：overwrite settings.json，重建已删除的 sessions/s1.log
+        const ap = await panel39.importApply({ sourcePath: exp.path, decisions: { 'settings.json': 'overwrite' } });
+        ok(ap.ok === true && ap.encrypted === false, '39 importApply 成功');
+        ok(ap.applied >= 2 && ap.overwrote >= 1 && ap.skipped === 0, `39 importApply applied/overwrote/skipped 生效（applied=${ap.applied} overwrote=${ap.overwrote} skipped=${ap.skipped}）`);
+        ok(await fs.readFile(path.join(env39.dsh, 'settings.json'), 'utf8') === '{"a":1}', '39 覆盖后 settings.json 恢复为导出内容');
+        ok(await fs.readFile(path.join(env39.dsh, 'sessions', 's1.log'), 'utf8') === 'session one', '39 已删除的 sessions/s1.log 被重建');
+        ok(typeof ap.snapshot === 'string' && ap.snapshot.startsWith('dsh-pre-import-'), `39 导入前自动快照生成: ${ap.snapshot}`);
+        ok(!(await listArchives(env39.root)).some((n) => n.startsWith('dsh-pre-import-')), '39 导入前快照不进用户备份列表');
+
+        // 39e 默认 keep：再次改动 settings.json，不带 overwrite 决策 → 跳过不覆盖
+        await fs.writeFile(path.join(env39.dsh, 'settings.json'), '{"a":3}');
+        const apKeep = await panel39.importApply({ sourcePath: exp.path, decisions: {} });
+        ok(apKeep.ok === true && apKeep.applied === 0 && apKeep.skipped >= 1, `39 默认 keep 不覆盖（skipped=${apKeep.skipped}）`);
+        ok(await fs.readFile(path.join(env39.dsh, 'settings.json'), 'utf8') === '{"a":3}', '39 keep 后 settings.json 保持本机值');
+
+        // 39f 加密导出：错口令预览被拒（人话）/ 正确口令可读
+        const expEnc = await panel39.exportConfig({ password: 'exp-pass' });
+        ok(expEnc.ok === true && expEnc.encrypted === true, '39 加密导出成功');
+        ok(await fs.stat(`${expEnc.path}.encrypted.json`).then(() => true, () => false), '39 加密导出带 .encrypted.json 边车');
+        const prevBad = await panel39.importPreview({ sourcePath: expEnc.path, password: 'nope' });
+        ok(prevBad.ok === false && String(prevBad.summary).includes('口令错误或归档已损坏'), '39 加密导出错口令预览被拒（人话）');
+        const prevOk = await panel39.importPreview({ sourcePath: expEnc.path, password: 'exp-pass' });
+        ok(prevOk.ok === true && prevOk.encrypted === true, '39 加密导出正确口令可预览');
+
+        // 39g 失败不半截写：非法 sourcePath → 报错且现有文件不变
+        const beforeBad = await fs.readFile(path.join(env39.dsh, 'settings.json'), 'utf8');
+        const apBad = await panel39.importApply({ sourcePath: `${env39.root}/no-such.zip` });
+        ok(apBad.ok === false, '39 非法 sourcePath importApply 报错（非崩溃）');
+        ok(await fs.readFile(path.join(env39.dsh, 'settings.json'), 'utf8') === beforeBad, '39 失败后 settings.json 未被半截写坏');
+      } finally {
+        await rmTemp(env39.dir);
+      }
+    }
+
+    console.log('40) GFS 保留：默认 0 等价旧行为；设了后月/年各留一份不被 keep 轮换删');
+    {
+      // 40a 纯函数（固定日期，无运行时日期边界抖动）
+      const { gfsProtectedSet } = await import(new URL('../lib/gfs.js', import.meta.url).href);
+      const newest40 = 'dsh-20260118-000000000.tar.gz';
+      const tail40 = [
+        { name: 'dsh-20260110-000000000.tar.gz' },
+        { name: 'dsh-20251215-000000000.tar.gz' },
+        { name: 'dsh-20251120-000000000.tar.gz' },
+        { name: 'dsh-20251001-000000000.tar.gz' },
+        { name: 'dsh-20250615-000000000.tar.gz' },
+        { name: 'dsh-20240310-000000000.tar.gz' },
+      ];
+      const gfs0 = gfsProtectedSet(tail40, newest40, { monthly: 0, yearly: 0 });
+      ok(gfs0.size === 0, '40a gfsMonthly/gfsYearly=0 等价旧行为（空保护集）');
+      const gfs2 = gfsProtectedSet(tail40, newest40, { monthly: 2, yearly: 1 });
+      ok(gfs2.has('dsh-20260110-000000000.tar.gz'), '40a 月1（2026-01）受保护');
+      ok(gfs2.has('dsh-20251215-000000000.tar.gz'), '40a 月2（2025-12）受保护');
+      ok(!gfs2.has('dsh-20251120-000000000.tar.gz'), '40a 月3（2025-11）超出 monthly=2 不受保护');
+      ok(!gfs2.has('dsh-20240310-000000000.tar.gz'), '40a 年2（2024）超出 yearly=1 不受保护');
+
+      // 40b/40c 集成：keep=1 下，GFS 开/关对跨月跨年归档的保留与否
+      const gfsFakeDays = [1, 2, 3, 4, 5, 6, 7, 14, 21, 28, 35, 150, 400, 800];
+      const gfsDayPrefix = (daysAgo) => {
+        const d = new Date(Date.now() - daysAgo * 86400000);
+        const p = (v, w = 2) => String(v).padStart(w, '0');
+        return `dsh-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-`;
+      };
+      const gfsKept = (names, daysAgo) => names.some((n) => n.startsWith(gfsDayPrefix(daysAgo)));
+      const seedGfsFakes = async (root, srcArc) => {
+        for (let i = 0; i < gfsFakeDays.length; i += 1) {
+          const dte = new Date(Date.now() - gfsFakeDays[i] * 86400000);
+          const p = (v, w = 2) => String(v).padStart(w, '0');
+          const name = `dsh-${dte.getFullYear()}${p(dte.getMonth() + 1)}${p(dte.getDate())}-${p(i % 24)}${p((i * 7) % 60)}${p((i * 13) % 60)}${p(i, 3)}.tar.gz`;
+          for (const suf of ['', '.sha256', '.meta.json']) await fs.copyFile(`${root}/${srcArc}${suf}`, `${root}/${name}${suf}`);
+        }
+      };
+      // 40b GFS 开启（budget 足够大 → 跨月/跨年归档全保留）
+      const envGfsOn = await mkTmpHome();
+      try {
+        const mockOn = makeCtx({ home: envGfsOn.home, dsh: envGfsOn.dsh });
+        plugin(mockOn.ctx, { gfsMonthly: 24, gfsYearly: 3, keep: 1 });
+        await mockOn.handler('');
+        const srcOn = (await listArchives(envGfsOn.root))[0];
+        await seedGfsFakes(envGfsOn.root, srcOn);
+        const bOn = await mockOn.handler('--keep 1');
+        ok(bOn.kind === 'success', '40b keep=1 备份成功');
+        const namesOn = await listArchives(envGfsOn.root);
+        ok(gfsKept(namesOn, 150), '40b D-150（~5 月前）被 GFS 月层保留');
+        ok(gfsKept(namesOn, 400), '40b D-400（~去年）被 GFS 年层保留');
+        ok(gfsKept(namesOn, 800), '40b D-800（~2 年前）被 GFS 年层保留');
+      } finally {
+        await rmTemp(envGfsOn.dir);
+      }
+      // 40c GFS 关闭（默认 0 → 跨月/跨年归档被 keep 轮换删，等价旧行为）
+      const envGfsOff = await mkTmpHome();
+      try {
+        const mockOff = makeCtx({ home: envGfsOff.home, dsh: envGfsOff.dsh });
+        plugin(mockOff.ctx, { keep: 1 });
+        await mockOff.handler('');
+        const srcOff = (await listArchives(envGfsOff.root))[0];
+        await seedGfsFakes(envGfsOff.root, srcOff);
+        const bOff = await mockOff.handler('--keep 1');
+        ok(bOff.kind === 'success', '40c keep=1 备份成功');
+        const namesOff = await listArchives(envGfsOff.root);
+        ok(!gfsKept(namesOff, 150), '40c D-150 默认被删（旧行为）');
+        ok(!gfsKept(namesOff, 400), '40c D-400 默认被删');
+        ok(!gfsKept(namesOff, 800), '40c D-800 默认被删');
+      } finally {
+        await rmTemp(envGfsOff.dir);
+      }
+    }
+
+    console.log('41) 操作锁：acquire 并发拒绝 / release 放行 / 死锁 reclaim / 活锁不误踢');
+    {
+      const { acquireLock, releaseLock, reclaimLock, isLockStale } = await import(new URL('../lib/oplock.js', import.meta.url).href);
+      const lockDir41 = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-oplock-'));
+      const lockPath41 = `${lockDir41}/.oplock.json`;
+      try {
+        const a1 = await acquireLock(lockPath41, 'backup');
+        ok(a1.acquired === true, '41 acquire 成功');
+        const a2 = await acquireLock(lockPath41, 'restore');
+        ok(a2.acquired === false && a2.reason === '另一操作正在运行' && a2.heldBy?.pid === process.pid, '41 并发 acquire 被拒（heldBy.pid 正确）');
+        ok(await releaseLock(lockPath41, a1.lock.token) === true, '41 release 成功');
+        const a3 = await acquireLock(lockPath41, 'restore');
+        ok(a3.acquired === true, '41 release 后再 acquire 放行');
+        await releaseLock(lockPath41, a3.lock.token);
+        // 死锁（pid 不存在 → ESRCH）
+        await fs.writeFile(lockPath41, JSON.stringify({ pid: 99999999, token: 'dead', operation: 'backup', startedAt: null, heartbeatAt: null }));
+        ok(isLockStale(JSON.parse(await fs.readFile(lockPath41, 'utf8'))) === true, '41 死锁（pid 已死）判 stale');
+        const a4 = await acquireLock(lockPath41, 'backup');
+        ok(a4.acquired === true, '41 死锁下次 acquire 自动回收');
+        await releaseLock(lockPath41, a4.lock.token);
+        // 活锁（当前 pid 存活）
+        await fs.writeFile(lockPath41, JSON.stringify({ pid: process.pid, token: 'live', operation: 'backup', startedAt: null, heartbeatAt: null }));
+        const rLive = await reclaimLock(lockPath41, { force: false });
+        ok(rLive.reclaimed === false && String(rLive.reason).includes('仍在运行'), '41 活锁默认不误踢');
+        const rForce = await reclaimLock(lockPath41, { force: true });
+        ok(rForce.reclaimed === true, '41 活锁 force 显式回收');
+      } finally {
+        await rmTemp(lockDir41);
+      }
+      // 集成：备份完成后锁被正确释放（无残留死锁）
+      const envLock = await mkTmpHome();
+      try {
+        const mockLock = makeCtx({ home: envLock.home, dsh: envLock.dsh });
+        plugin(mockLock.ctx, {});
+        const panelLock = mockLock.services.find((s) => s.name === 'backupPanel');
+        await panelLock.backup(undefined, undefined);
+        const ls = await panelLock.lockStatus();
+        ok(ls.ok === true && ls.held === false, '41 备份完成后锁已释放（lockStatus held=false）');
+      } finally {
+        await rmTemp(envLock.dir);
+      }
+    }
+
+    console.log('42) 磁盘占用报告 + 分级清理（cleanup cache 只删可再生暂存，不碰快照/同步/vault）');
+    {
+      const env42 = await mkTmpHome();
+      try {
+        const mock42 = makeCtx({ home: env42.home, dsh: env42.dsh });
+        plugin(mock42.ctx, {});
+        const panel42 = mock42.services.find((s) => s.name === 'backupPanel');
+        await mock42.handler(''); // 让 root 存在
+        await fs.mkdir(`${env42.root}/.import-stage-abc`, { recursive: true });
+        await fs.writeFile(`${env42.root}/.import-stage-abc/x.txt`, 'x');
+        await fs.writeFile(`${env42.root}/.export-yyy.tmp.zip`, 'zip');
+        await fs.writeFile(`${env42.root}/.decrypt-zzz.tar.gz`, 'tar');
+        await fs.writeFile(`${env42.root}/.pull-qqq`, 'pull');
+        await fs.writeFile(`${env42.root}/dsh-pre-upgrade-20260101-000000000.tar.gz`, 'snap');
+        await fs.mkdir(`${env42.root}/.github-sync`, { recursive: true });
+        await fs.writeFile(`${env42.root}/.github-sync/keep.txt`, 'keep');
+        await fs.mkdir(`${env42.root}/vault`, { recursive: true });
+        await fs.writeFile(`${env42.root}/vault/secret.txt`, 'vault');
+        const du = await panel42.diskUsage();
+        ok(du.ok === true && Array.isArray(du.categories) && du.total > 0, '42 diskUsage 返回分类');
+        const cat42 = Object.fromEntries(du.categories.map((c) => [c.key, c]));
+        ok(cat42.cache && cat42.cache.files >= 4, `42 diskUsage cache 分类 ≥4 项（实际 ${cat42.cache?.files}）`);
+        ok(cat42.snapshots && cat42.snapshots.files >= 1, '42 diskUsage snapshots 分类');
+        ok(cat42.vault && cat42.vault.files >= 1, '42 diskUsage vault 分类');
+        const cl = await panel42.cleanup('cache', undefined);
+        ok(cl.ok === true, '42 cleanup(cache) 成功');
+        ok(await fs.stat(`${env42.root}/.import-stage-abc`).then(() => false, () => true), '42 .import-stage-* 被删');
+        ok(await fs.stat(`${env42.root}/.export-yyy.tmp.zip`).then(() => false, () => true), '42 .export-* 被删');
+        ok(await fs.stat(`${env42.root}/.decrypt-zzz.tar.gz`).then(() => false, () => true), '42 .decrypt-* 被删');
+        ok(await fs.stat(`${env42.root}/.pull-qqq`).then(() => false, () => true), '42 .pull-* 被删');
+        ok(await fs.stat(`${env42.root}/dsh-pre-upgrade-20260101-000000000.tar.gz`).then(() => true, () => false), '42 快照未被 cleanup(cache) 删');
+        ok(await fs.stat(`${env42.root}/.github-sync/keep.txt`).then(() => true, () => false), '42 同步副本未被 cleanup(cache) 删');
+        ok(await fs.stat(`${env42.root}/vault/secret.txt`).then(() => true, () => false), '42 vault 未被 cleanup(cache) 删');
+        const clE = await panel42.cleanup('expired', undefined);
+        ok(clE.ok === true, '42 cleanup(expired) 成功');
+        ok(await fs.stat(`${env42.root}/dsh-pre-upgrade-20260101-000000000.tar.gz`).then(() => true, () => false), '42 快照未被 cleanup(expired) 删');
+        ok(await fs.stat(`${env42.root}/vault/secret.txt`).then(() => true, () => false), '42 vault 未被 cleanup(expired) 删');
+      } finally {
+        await rmTemp(env42.dir);
+      }
+    }
+
+    console.log('43) 每周调度：setWeekly 与 autoHours 互斥、持久化 auto.json');
+    {
+      const env43 = await mkTmpHome();
+      try {
+        const mock43 = makeCtx({ home: env43.home, dsh: env43.dsh });
+        plugin(mock43.ctx, {});
+        const panel43 = mock43.services.find((s) => s.name === 'backupPanel');
+        const readAuto43 = async () => JSON.parse(await fs.readFile(`${env43.root}/auto.json`, 'utf8'));
+        const sw = await panel43.setWeekly([{ day: 1, time: '03:30' }, { day: 4, time: '23:00' }]);
+        ok(sw.ok === true && Array.isArray(sw.weekly) && sw.weekly.length === 2, '43 setWeekly 成功');
+        let auto43 = await readAuto43();
+        ok(Array.isArray(auto43.weekly) && auto43.weekly.length === 2 && auto43.hours === 0, '43 weekly 持久化进 auto.json 且 hours=0');
+        const swBad = await panel43.setWeekly([{ day: 0, time: '03:30' }]);
+        ok(swBad.ok === false, '43 非法 day 被拒');
+        const sa = await panel43.setAuto(6);
+        ok(sa.ok === true, '43 setAuto 成功');
+        auto43 = await readAuto43();
+        ok(auto43.hours === 6 && (!Array.isArray(auto43.weekly) || auto43.weekly.length === 0), '43 setAuto 清掉 weekly（互斥）');
+        const sw2 = await panel43.setWeekly([{ day: 7, time: '00:05' }]);
+        ok(sw2.ok === true, '43 再设 weekly 成功');
+        auto43 = await readAuto43();
+        ok(auto43.hours === 0 && Array.isArray(auto43.weekly) && auto43.weekly.length === 1, '43 weekly 清掉 hours（互斥）');
+        const swOff = await panel43.setWeekly([]);
+        ok(swOff.ok === true, '43 setWeekly([]) 关闭成功');
+        auto43 = await readAuto43();
+        ok(auto43.hours === 0 && (!auto43.weekly || auto43.weekly.length === 0), '43 关闭后 hours=0 且 weekly 空');
+      } finally {
+        await rmTemp(env43.dir);
+      }
+    }
+
+    console.log('44) 同步通道：setSyncChannel 持久化 0600 + syncStatus 脱敏 + removeSyncChannel 生效');
+    {
+      const env44 = await mkTmpHome();
+      try {
+        const mock44 = makeCtx({ home: env44.home, dsh: env44.dsh });
+        plugin(mock44.ctx, {});
+        // 等启动钩子的 loadSyncChannels() 落定：生产里面板在 boot 后才可用，smoke 里
+        // 同步紧跟 plugin() 会让 loadSyncChannels 与 setSyncChannel 竞争 syncChannels
+        // 内存态（load 把文件读回的空对象覆盖掉刚 set 的通道）。
+        await new Promise((r) => setTimeout(r, 300));
+        const panel44 = mock44.services.find((s) => s.name === 'backupPanel');
+        const sw = await panel44.setSyncChannel('webdav', { url: 'https://dav.example.com/dsh', username: 'u', password: 'p@ss' });
+        ok(sw.ok === true && sw.channel && sw.channel.configured === true, '44 setSyncChannel webdav 成功');
+        ok(sw.channel.passwordSet === true && !('password' in sw.channel), '44 回显脱敏：只给 passwordSet，不给明文');
+        ok(!JSON.stringify(sw).includes('p@ss'), '44 回执不含明文口令');
+        const syncText = await fs.readFile(`${env44.root}/sync.json`, 'utf8');
+        ok(syncText.includes('p@ss') && syncText.includes('https://dav.example.com'), '44 sync.json 持久化（明文凭据只存本机）');
+        if (!IS_WIN) {
+          const syncMode = (await fs.stat(`${env44.root}/sync.json`)).mode & 0o777;
+          ok(syncMode === 0o600, `44 sync.json 权限 0600（实际 ${syncMode.toString(8)}）`);
+        }
+        const ss = await panel44.syncStatus();
+        ok(ss.ok === true && ss.channels && ss.channels.webdav && ss.channels.webdav.configured === true, '44 syncStatus webdav 已配置');
+        ok(ss.channels.webdav.passwordSet === true && !JSON.stringify(ss).includes('p@ss'), '44 syncStatus 脱敏（无明文口令）');
+        const s3 = await panel44.setSyncChannel('s3', { endpoint: 'https://s3.example.com', region: 'us-east-1', bucket: 'bk', accessKey: 'AKIA', secretKey: 's3cret', pathPrefix: 'dsh' });
+        ok(s3.ok === true && s3.channel.secretKeySet === true && !JSON.stringify(s3).includes('s3cret'), '44 setSyncChannel s3 成功且 secretKey 脱敏');
+        const gist = await panel44.setSyncChannel('gist', { token: `ghp_${'a'.repeat(36)}` });
+        ok(gist.ok === true && gist.channel.tokenSet === true && !JSON.stringify(gist).includes('ghp_'), '44 setSyncChannel gist 成功且 token 脱敏');
+        const bad = await panel44.setSyncChannel('s3', { endpoint: 'not-a-url', bucket: 'x', accessKey: 'a', secretKey: 's' });
+        ok(bad.ok === false, '44 非法 S3 endpoint 被拒');
+        const badGist = await panel44.setSyncChannel('gist', { token: 'short' });
+        ok(badGist.ok === false, '44 非法 gist token 被拒');
+        const noCh = await panel44.syncNow('nope', undefined);
+        ok(noCh.ok === false && String(noCh.summary).includes('未配置'), '44 未配置通道 syncNow 优雅报错（不触碰网络）');
+        const rm44 = await panel44.removeSyncChannel('webdav');
+        ok(rm44.ok === true, '44 removeSyncChannel webdav 成功');
+        const ss2 = await panel44.syncStatus();
+        ok(ss2.ok === true && ss2.channels.webdav.configured === false, '44 removeSyncChannel 后 webdav 未配置');
+      } finally {
+        await rmTemp(env44.dir);
+      }
+    }
+
+    console.log('45) about()：7 键 shape + 版本 + pluginDir 脱敏 + 无凭据字段');
+    {
+      // 45a 常规：shape / 版本 / 平台 / 无凭据字段
+      const env45 = await mkTmpHome();
+      try {
+        const mock45 = makeCtx({ home: env45.home, dsh: env45.dsh });
+        plugin(mock45.ctx, {});
+        const panel45 = mock45.services.find((s) => s.name === 'backupPanel');
+        const about = await panel45.about();
+        ok(about.ok === true && JSON.stringify(Object.keys(about)) === JSON.stringify(['ok', 'version', 'dshVersion', 'platform', 'node', 'profile', 'pluginDir']), `45 about 返回 7 键 shape: ${Object.keys(about).join(',')}`);
+        const pkg45 = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
+        ok(about.version === pkg45.version, `45 version=插件版本 ${pkg45.version}`);
+        ok(typeof about.dshVersion === 'string' && about.dshVersion.length > 0, `45 dshVersion 是测到的主机版本: ${about.dshVersion}`);
+        ok(about.platform === process.platform && about.node === process.version && about.profile === 'web', `45 platform/node/profile 正确: ${about.platform}/${about.node}/${about.profile}`);
+        ok(typeof about.pluginDir === 'string' && about.pluginDir.length > 0, '45 pluginDir 是字符串');
+        ok(!/password|secret|token|apiKey|accessKey|secretKey|credential/i.test(JSON.stringify(about)), '45 返回体不含凭据/密钥字段');
+      } finally {
+        await rmTemp(env45.dir);
+      }
+      // 45b 脱敏：home 指向 repo 父目录时，pluginDir 被 mask 成 ~（不含 /Users/ 明文）。
+      // 安全说明：destination 与 DSH_HOME 都指到临时目录，启动钩子只写临时目录、
+      // 不触碰真实 home；home 仅用于让 paths().home 与 repo 前缀重叠以触发脱敏。
+      // POSIX 专属：mask 依赖正斜杠路径语义，Windows 下 fileURLToPath 给反斜杠、
+      // 与 paths() 的正斜杠 home 前缀无法 startsWith，故跳过（保守，不写 win 断言）。
+      if (!IS_WIN) {
+        const tmp45b = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-about-'));
+        try {
+          const dsh45b = path.join(tmp45b, '.dsh').split(path.sep).join('/');
+          const dest45b = path.join(tmp45b, 'bkdest').split(path.sep).join('/');
+          await fs.mkdir(path.join(tmp45b, '.dsh'), { recursive: true });
+          const mock45b = makeCtx({ home: path.dirname(REPO), dsh: dsh45b, env: { DSH_HOME: dsh45b } });
+          plugin(mock45b.ctx, { destination: dest45b });
+          const panel45b = mock45b.services.find((s) => s.name === 'backupPanel');
+          const about45b = await panel45b.about();
+          ok(about45b.ok === true && about45b.pluginDir === `~/${path.basename(REPO)}`, `45 about pluginDir 在 home 下脱敏为 ~: ${about45b.pluginDir}`);
+          ok(!String(about45b.pluginDir).includes('/Users/'), '45 脱敏后 pluginDir 不含 /Users/ 明文');
+        } finally {
+          await rmTemp(tmp45b);
+        }
+      } else {
+        console.log('  ⏭️  45b（pluginDir 脱敏）依赖 POSIX 路径语义，Windows 跳过');
+      }
+    }
+
+    console.log('46) 配置管理 agent 工具（config_backup/list_snapshots/restore/sync_push/sync_pull）');
+    {
+      const env46 = await mkTmpHome();
+      const ghBare46 = path.join(env46.dir, 'bare.git');
+      try {
+        await new Promise((resolve) => { const c = spawn('git', ['init', '--bare', '-b', 'main', ghBare46], { stdio: 'ignore' }); c.on('close', resolve); });
+        await fs.mkdir(env46.root, { recursive: true }); // exportConfig 落盘需要备份目录存在
+        const mock46 = makeCtx({ home: env46.home, dsh: env46.dsh });
+        plugin(mock46.ctx, { githubRepo: ghBare46.split(path.sep).join('/'), keep: 3 });
+        const T46 = (n) => mock46.toolByName(n);
+        const run46 = mock46.handler;
+
+        // 46a config_backup：默认脱敏导出；includeCredentials 必须配 password；口令不出参
+        const cb1 = await T46('config_backup').execute({}, {});
+        ok(cb1.ok === true && cb1.encrypted === false && typeof cb1.name === 'string' && cb1.name.startsWith('dsh-config-') && cb1.name.endsWith('.zip'), `46a config_backup 默认导出成功（未加密）: ${cb1.name}`);
+        ok(Array.isArray(cb1.redactedFiles) && cb1.redactedFiles.includes('.credentials.yaml'), '46a 默认脱敏 .credentials.yaml');
+        const cbBad = await T46('config_backup').execute({ includeCredentials: true }, {});
+        ok(cbBad.ok === false && String(cbBad.summary).includes('必须加密'), '46a includeCredentials 不配 password 被拒');
+        const cbEnc = await T46('config_backup').execute({ password: 'cfg-pass', includeCredentials: true }, {});
+        ok(cbEnc.ok === true && cbEnc.encrypted === true && !JSON.stringify(cbEnc).includes('cfg-pass'), '46a 加密导出成功且口令不出参');
+
+        // 46b config_list_snapshots：造一份恢复前快照后列出
+        await run46('');
+        await fs.writeFile(path.join(env46.dsh, 'marker.txt'), 'x');
+        await run46('restore latest');
+        const ls46 = await T46('config_list_snapshots').execute({}, {});
+        ok(ls46.ok === true && Array.isArray(ls46.snapshots) && ls46.snapshots.length >= 1, '46b config_list_snapshots 列出快照');
+        ok(ls46.snapshots.some((s) => s.source === 'restore' && s.id.startsWith('dsh-pre-restore-') && typeof s.entries === 'number'), '46b 快照含 restore 来源 + 条目数');
+
+        // 46c config_restore：默认 dry-run 零写入；confirm:true 才执行
+        await fs.writeFile(path.join(env46.dsh, 'settings.json'), '{"a":2}');
+        const crDry = await T46('config_restore').execute({ snapshot: 'latest' }, {});
+        ok(crDry.ok === true && crDry.dryRun === true, '46c config_restore 默认 dry-run（零写入）');
+        ok(await fs.readFile(path.join(env46.dsh, 'settings.json'), 'utf8') === '{"a":2}', '46c dry-run 未改动 settings.json');
+        const crReal = await T46('config_restore').execute({ snapshot: 'latest', confirm: true }, {});
+        ok(crReal.ok === true && crReal.dryRun === false, '46c config_restore confirm:true 真实恢复');
+        ok(await fs.readFile(path.join(env46.dsh, 'settings.json'), 'utf8') === '{"a":1}', '46c 真实恢复后 settings.json 回到备份时点');
+
+        // 46d config_sync_push：显式写远端（github）；口令不出参
+        const spBad = await T46('config_sync_push').execute({ channel: 'nope' }, {});
+        ok(spBad.ok === false && String(spBad.summary).includes('未配置'), '46d 未配置通道 sync_push 优雅报错');
+        const sp = await T46('config_sync_push').execute({ channel: 'github', password: 'push-pass' }, {});
+        ok(sp.ok === true && !JSON.stringify(sp).includes('push-pass'), '46d sync_push 显式写成功且口令不出参');
+
+        // 46e config_sync_pull：只读不写用户数据
+        const beforePull = await fs.readFile(path.join(env46.dsh, 'settings.json'), 'utf8');
+        const puG = await T46('config_sync_pull').execute({ channel: 'github' }, {});
+        ok(puG.ok === true && typeof puG.total === 'number' && Array.isArray(puG.missing), '46e sync_pull(github) 只读 diff');
+        ok(await fs.readFile(path.join(env46.dsh, 'settings.json'), 'utf8') === beforePull, '46e sync_pull 未写用户数据');
+        const puW = await T46('config_sync_pull').execute({ channel: 'webdav' }, {});
+        ok(puW.ok === true && String(puW.summary).includes('仅支持推送'), '46e sync_pull(webdav) 只读提示');
+      } finally {
+        await rmTemp(env46.dir);
+      }
+    }
+
+    console.log('47) 离线 CLI：reinstall 确认码门禁 / sessions repair 首帧重写 / recover-stale-lock 不误踢');
+    {
+      const env47 = await mkTmpHome();
+      try {
+        const mock47 = makeCtx({ home: env47.home, dsh: env47.dsh });
+        plugin(mock47.ctx, {});
+        await mock47.handler(''); // 备份 → 落盘 rescue.mjs 到备份目录
+        const rescueFile = `${env47.root}/rescue.mjs`;
+        ok(await fs.stat(rescueFile).then(() => true, () => false), '47 rescue.mjs 已随备份落盘');
+        const r47 = (args, extraEnv = {}) => spawnSync(process.execPath, [rescueFile, ...args], { encoding: 'utf8', env: { ...process.env, DSH_HOME: env47.dsh, ...extraEnv } });
+
+        // 47a reinstall：6 位确认码门禁（假 npm 注入 PATH，POSIX 专属）
+        if (!IS_WIN) {
+          const binDir47 = path.join(env47.dir, 'fakebin');
+          await fs.mkdir(binDir47, { recursive: true });
+          const npmLog47 = path.join(env47.dir, 'npm-argv.log');
+          await fs.writeFile(path.join(binDir47, 'npm'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${npmLog47}"\n`);
+          await fs.chmod(path.join(binDir47, 'npm'), 0o755);
+          const r47a = (args) => r47(args, { PATH: `${binDir47}${path.delimiter}${process.env.PATH}` });
+          const noCode = r47a(['reinstall', '--package', '@deepseek-ai/dsh']);
+          ok(noCode.status === 0 && noCode.stdout.includes('确认码:') && noCode.stdout.includes('确认执行:'), '47a reinstall 无 --code 打印确认码并等待');
+          ok(await fs.stat(`${env47.root}/.reinstall-code`).then(() => true, () => false), '47a .reinstall-code 落盘');
+          const badCode = r47a(['reinstall', '--package', '@deepseek-ai/dsh', '--code', '000000']);
+          ok(badCode.status !== 0 && String(badCode.stderr).includes('确认码不匹配或已过期'), '47a 错码被拒');
+          const code = (await fs.readFile(`${env47.root}/.reinstall-code`, 'utf8')).trim();
+          const goodCode = r47a(['reinstall', '--package', '@deepseek-ai/dsh', '--code', code]);
+          ok(goodCode.status === 0 && goodCode.stdout.includes('已重装'), '47a 正确码执行重装');
+          const npmArgv = (await fs.readFile(npmLog47, 'utf8')).trim();
+          ok(npmArgv.includes('uninstall') && npmArgv.includes('install'), `47a 假 npm 收到 uninstall/install: ${npmArgv}`);
+        } else {
+          console.log('  ⏭️  47a（reinstall 假 npm 注入 PATH）依赖 POSIX shell 脚本，Windows 跳过');
+        }
+
+        // 47b sessions repair：默认 dry-run；--fix 只重写首行（cwd），其余行字节不变
+        const sessDir47 = path.join(env47.dsh, 'sessions', '--proj--', 'raw');
+        await fs.mkdir(sessDir47, { recursive: true });
+        const hdr47 = (id, cwd) => JSON.stringify({ type: 'session', version: 0, id, createdAt: 1724544000000, delegationDepth: 0, cwd });
+        const ev47 = (seq) => JSON.stringify({ type: 'user/message', seq });
+        const rawBody47 = [hdr47('sess-a', '/old/prefix/proj-a'), ev47(0), ev47(1)].join('\n') + '\n';
+        await fs.writeFile(path.join(sessDir47, 'session.jsonl'), rawBody47);
+        const dry47 = r47(['sessions', 'repair', '--map', '/old/prefix=/new/prefix']);
+        ok(dry47.status === 0 && dry47.stdout.includes('dry-run') && dry47.stdout.includes('/new/prefix/proj-a'), '47b sessions repair 默认 dry-run 出计划');
+        ok((await fs.readFile(path.join(sessDir47, 'session.jsonl'), 'utf8')) === rawBody47, '47b dry-run 零写入（文件未变）');
+        const fix47 = r47(['sessions', 'repair', '--fix', '--map', '/old/prefix=/new/prefix']);
+        ok(fix47.status === 0 && fix47.stdout.includes('已修复'), '47b --fix 执行修复');
+        const fixed47 = (await fs.readFile(path.join(sessDir47, 'session.jsonl'), 'utf8')).split('\n').filter(Boolean);
+        ok(fixed47[0].includes('/new/prefix/proj-a') && !fixed47[0].includes('/old/prefix'), '47b 首行 cwd 已重写');
+        ok(fixed47[1] === ev47(0) && fixed47[2] === ev47(1), '47b 其余行字节不变（只重写首行）');
+        // --keep 去重：同 id 两个文件，只处理首个（不同 id 被跳过）
+        const keepA = path.join(env47.dsh, 'sessions', '--keep--', 'keep-a');
+        const keepB = path.join(env47.dsh, 'sessions', '--keep--', 'keep-b');
+        await fs.mkdir(keepA, { recursive: true });
+        await fs.mkdir(keepB, { recursive: true });
+        await fs.writeFile(path.join(keepA, 'session.jsonl'), [hdr47('sess-keep', '/old/keep/proj-a'), ev47(0)].join('\n') + '\n');
+        await fs.writeFile(path.join(keepB, 'session.jsonl'), [hdr47('sess-keep', '/old/keep/proj-b'), ev47(0)].join('\n') + '\n');
+        const keep47 = r47(['sessions', 'repair', '--fix', '--map', '/old/keep=/new/keep', '--keep', 'sess-keep']);
+        ok(keep47.status === 0, '47b --keep 执行');
+        const keepARes = await fs.readFile(path.join(keepA, 'session.jsonl'), 'utf8');
+        const keepBRes = await fs.readFile(path.join(keepB, 'session.jsonl'), 'utf8');
+        ok(keepARes.includes('/new/keep') && keepBRes.includes('/old/keep'), '47b --keep 同 id 只处理首个（去重，其余跳过）');
+
+        // 47c recover-stale-lock：仅 ESRCH（owner 已死）回收，活锁拒绝
+        await fs.writeFile(`${env47.root}/.oplock.json`, JSON.stringify({ pid: 99999999, token: 'x', operation: 'backup', startedAt: null, heartbeatAt: null }));
+        const rcDead = r47(['recover-stale-lock']);
+        ok(rcDead.status === 0 && rcDead.stdout.includes('已回收死锁'), '47c 死锁（pid 已死）被回收');
+        await fs.writeFile(`${env47.root}/.oplock.json`, JSON.stringify({ pid: process.pid, token: 'x', operation: 'backup', startedAt: null, heartbeatAt: null }));
+        const rcLive = r47(['recover-stale-lock']);
+        ok(rcLive.status !== 0 && rcLive.stdout.includes('仍在运行'), '47c 活锁（pid 存活）拒绝回收（不误踢）');
+      } finally {
+        await rmTemp(env47.dir);
+      }
+    }
+
+    console.log('48) 本地 link:/file: 插件迁移（manifest.localPlugins 状态）');
+    {
+      const env48 = await mkTmpHome();
+      try {
+        const localPkgDir = path.join(env48.dir, 'localpkg');
+        await fs.mkdir(localPkgDir, { recursive: true });
+        await fs.writeFile(path.join(localPkgDir, 'package.json'), JSON.stringify({ name: 'localpkg', version: '1.0.0' }));
+        await fs.writeFile(path.join(localPkgDir, 'index.js'), 'module.exports = 1;');
+        const profDir48 = path.join(env48.dsh, 'profiles', 'myprof');
+        await fs.mkdir(profDir48, { recursive: true });
+        await fs.writeFile(path.join(profDir48, 'package.json'), JSON.stringify({ name: 'myprof', version: '0.1.0', dependencies: { localpkg: `file:${localPkgDir}`, gone: `file:${env48.dir}/nonexistent` } }));
+
+        // 假 npm：生成假 .tgz 并打印文件名 → 「packed」在无健康 npm 的环境也确定可测
+        const fakeNpm48 = path.join(env48.dir, 'fake-npm.mjs');
+        await fs.writeFile(fakeNpm48, [
+          "import { writeFileSync } from 'node:fs';",
+          "import path from 'node:path';",
+          "const a = process.argv.slice(2);",
+          "const p = a.indexOf('pack'); const d = a.indexOf('--pack-destination');",
+          "const t = `${path.basename(a[p + 1])}-1.0.0.tgz`;",
+          "writeFileSync(path.join(a[d + 1], t), 'fake-tarball');",
+          "console.log(t);",
+        ].join('\n'));
+        // packed + missing（假 npm 可用）
+        const mock48 = makeCtx({ home: env48.home, dsh: env48.dsh, fake: { npm: [process.execPath, fakeNpm48] } });
+        plugin(mock48.ctx, {});
+        const panel48 = mock48.services.find((s) => s.name === 'backupPanel');
+        const exp48 = await panel48.exportConfig({});
+        ok(exp48.ok === true && Array.isArray(exp48.manifest?.localPlugins), '48 export manifest 含 localPlugins');
+        const lp48 = exp48.manifest.localPlugins;
+        const packed48 = lp48.find((p) => p.name === 'localpkg');
+        ok(packed48 && packed48.status === 'packed' && typeof packed48.tarball === 'string' && packed48.tarball.endsWith('.tgz'), `48 localpkg 状态 packed（tarball=${packed48?.tarball}）`);
+        const missing48 = lp48.find((p) => p.name === 'gone');
+        ok(missing48 && missing48.status === 'missing', '48 gone 状态 missing（路径不存在）');
+
+        // npm-missing：无 npm 回退保留原 spec
+        const mock48b = makeCtx({ home: env48.home, dsh: env48.dsh, missing: ['npm'] });
+        plugin(mock48b.ctx, {});
+        const panel48b = mock48b.services.find((s) => s.name === 'backupPanel');
+        const exp48b = await panel48b.exportConfig({});
+        const nm48 = (exp48b.manifest?.localPlugins || []).find((p) => p.name === 'localpkg');
+        ok(nm48 && nm48.status === 'npm-missing' && String(nm48.spec).includes('file:'), `48 无 npm 回退（npm-missing 保留原 spec=${nm48?.spec}）`);
+      } finally {
+        await rmTemp(env48.dir);
+      }
+    }
+
+    console.log('49) Profiles 管理（list/create/rename/delete/launch/stop + 内置只读拒绝）');
+    {
+      const env49 = await mkTmpHome();
+      try {
+        await fs.mkdir(path.join(env49.dsh, 'profiles', 'desktop'), { recursive: true });
+        await fs.mkdir(path.join(env49.dsh, 'profiles', 'web'), { recursive: true });
+        await fs.writeFile(path.join(env49.dsh, 'profiles', 'desktop', 'package.json'), '{"name":"desktop","version":"1.0.0"}');
+        await fs.writeFile(path.join(env49.dsh, 'profiles', 'web', 'package.json'), '{"name":"web","version":"1.0.0"}');
+        const mock49 = makeCtx({ home: env49.home, dsh: env49.dsh, missing: ['dsh'] });
+        plugin(mock49.ctx, {});
+        const panel49 = mock49.services.find((s) => s.name === 'backupPanel');
+
+        const pl = await panel49.profilesList();
+        ok(pl.ok === true && Array.isArray(pl.profiles), '49 profilesList 返回 profiles');
+        const prof49 = Object.fromEntries((pl.profiles || []).map((p) => [p.name, p]));
+        ok(prof49.desktop && prof49.desktop.appOwned === true && prof49.desktop.readonly === true, '49 desktop 标注 app-owned/readonly');
+        ok(prof49.web && prof49.web.appOwned === true && prof49.web.readonly === true, '49 web 标注 app-owned/readonly');
+
+        const cr = await panel49.profileCreate('myprof');
+        ok(cr.ok === true, '49 create 成功');
+        ok(await fs.stat(path.join(env49.dsh, 'profiles', 'myprof', 'package.json')).then(() => true, () => false) && await fs.stat(path.join(env49.dsh, 'profiles', 'myprof', 'cordis.yml')).then(() => true, () => false), '49 create 落盘 package.json + cordis.yml 模板');
+        ok((await panel49.profileCreate('myprof')).ok === false, '49 重名 create 拒绝');
+        ok((await panel49.profileCreate('desktop')).ok === false, '49 内置名 create 拒绝');
+
+        const rn = await panel49.profileRename('myprof', 'renamed');
+        ok(rn.ok === true && rn.to === 'renamed', '49 rename 成功');
+        ok((await panel49.profileRename('desktop', 'x')).ok === false, '49 内置 rename 拒绝');
+        ok((await panel49.profileRename('renamed', 'desktop')).ok === false, '49 rename 目标内置拒绝');
+        ok((await panel49.profileCreate('other')).ok === true, '49 预建 other profile（供重名测试）');
+        const rnExist = await panel49.profileRename('renamed', 'other');
+        ok(rnExist.ok === false && String(rnExist.summary).includes('已存在'), '49 rename 目标已存在拒绝');
+
+        const la = await panel49.profileLaunch('renamed');
+        ok(la.ok === false && String(la.summary).includes('找不到 dsh'), '49 launch 找不到 dsh 给人话');
+        ok((await panel49.profileLaunch('web')).ok === false, '49 内置 launch 拒绝');
+
+        const st = await panel49.profileStop('renamed');
+        ok(st.ok === true && st.running === false, '49 stop 未运行 → running:false');
+
+        ok((await panel49.profileDelete('desktop')).ok === false, '49 内置 delete 拒绝');
+        ok((await panel49.profileDelete('nonexistent')).ok === false, '49 不存在 delete 拒绝');
+        const del = await panel49.profileDelete('renamed');
+        ok(del.ok === true, '49 硬删成功');
+      } finally {
+        await rmTemp(env49.dir);
+      }
+    }
+
+    console.log('50) 配置市场：索引校验 + 预览安装 + 确认安装（本地 http 桩）');
+    {
+      const env50 = await mkTmpHome();
+      const http = await import('node:http');
+      let server = null;
+      let bundleBuf = null;
+      const index = [
+        { id: 'm1', name: 'Test Config', desc: 'demo config', sections: ['settings'], source: 'local', risk: 'low', version: '1' },
+        { id: 'bad', name: 'Bad URL', url: 'file:///etc/passwd' },
+        { id: 'no-url', name: 'No URL' },
+      ];
+      try {
+        server = http.createServer((req, res) => {
+          const port = server.address().port;
+          if (req.url === '/market.json') {
+            const filled = index.map((e) => (e.id === 'm1' ? { ...e, url: `http://127.0.0.1:${port}/bundle.zip` } : e));
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify(filled));
+            return;
+          }
+          if (req.url === '/bundle.zip') {
+            res.writeHead(200, { 'content-type': 'application/zip' });
+            res.end(bundleBuf ?? Buffer.alloc(0));
+            return;
+          }
+          if (req.url === '/bad.json') {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end('not json at all');
+            return;
+          }
+          res.writeHead(404); res.end('nope');
+        });
+        await new Promise((r) => server.listen(0, '127.0.0.1', r));
+        const port = server.address().port;
+
+        const mock50 = makeCtx({ home: env50.home, dsh: env50.dsh });
+        plugin(mock50.ctx, { marketUrl: `http://127.0.0.1:${port}/market.json` });
+        const panel50 = mock50.services.find((s) => s.name === 'backupPanel');
+
+        // 先导出一份 bundle（导出物本身是合法 import 包），再喂给市场桩
+        const ex = await panel50.exportConfig({});
+        ok(ex.ok === true && typeof ex.path === 'string' && ex.path.endsWith('.zip'), '50 exportConfig 产出 bundle ZIP');
+        bundleBuf = await fs.readFile(ex.path);
+
+        const ml = await panel50.marketList();
+        ok(ml.ok === true && ml.enabled === true && Array.isArray(ml.entries), '50 marketList 返回 enabled + entries');
+        ok(ml.entries.length === 1 && ml.entries[0].id === 'm1', `50 非法条目被丢弃（只剩 m1，实际 ${ml.entries.length}）`);
+        ok(ml.entries[0].name === 'Test Config' && ml.entries[0].risk === 'low', '50 条目字段归一化');
+
+        const ms = await panel50.marketSearch('Test');
+        ok(ms.ok === true && ms.entries.length === 1, '50 marketSearch 命中');
+        const msMiss = await panel50.marketSearch('zzzz');
+        ok(msMiss.ok === true && msMiss.entries.length === 0, '50 marketSearch 无命中');
+
+        const before = await fs.readFile(path.join(env50.dsh, 'settings.json'), 'utf8');
+        const pv = await panel50.marketInstall({ id: 'm1' });
+        ok(pv.ok === true && pv.dryRun === true && pv.preview && pv.preview.ok === true, '50 marketInstall 默认 dry-run 只预览');
+        ok(Array.isArray(pv.supplyChain) && pv.supplyChain.length > 0, '50 第三方域名/来源提示进入 supplyChain');
+
+        const ap = await panel50.marketInstall({ id: 'm1', confirm: true });
+        ok(ap.ok === true && ap.dryRun === false, '50 marketInstall(confirm) 执行');
+        const after = await fs.readFile(path.join(env50.dsh, 'settings.json'), 'utf8');
+        ok(before === after, '50 安装后本机同内容未被改写（默认 keep）');
+
+        // 非法索引：不是 JSON
+        const mock50b = makeCtx({ home: env50.home, dsh: env50.dsh });
+        plugin(mock50b.ctx, { marketUrl: `http://127.0.0.1:${port}/bad.json` });
+        const panel50b = mock50b.services.find((s) => s.name === 'backupPanel');
+        const bad = await panel50b.marketList();
+        ok(bad.ok === true && bad.entries.length === 0 && String(bad.summary).includes('不是合法 JSON'), '50 非法索引优雅降级');
+
+        // 未配置 marketUrl：市场关闭
+        const mock50c = makeCtx({ home: env50.home, dsh: env50.dsh });
+        plugin(mock50c.ctx, {});
+        const panel50c = mock50c.services.find((s) => s.name === 'backupPanel');
+        const off = await panel50c.marketList();
+        ok(off.ok === true && off.enabled === false, '50 未配置 marketUrl → 市场关闭');
+      } finally {
+        if (server) await new Promise((r) => server.close(r));
+        await rmTemp(env50.dir);
+      }
+    }
+
+    console.log('51) 外部 agent 导入：检测 + 预览 + 导入（Claude Code 桩）');
+    {
+      const env51 = await mkTmpHome();
+      try {
+        await fs.mkdir(path.join(env51.home, '.claude', 'skills', 'demo-skill'), { recursive: true });
+        await fs.writeFile(path.join(env51.home, '.claude', 'skills', 'demo-skill', 'SKILL.md'), '# demo skill');
+        await fs.writeFile(path.join(env51.home, '.claude', 'CLAUDE.md'), '# global instructions');
+        await fs.writeFile(path.join(env51.home, '.claude', 'settings.json'), JSON.stringify({ mcpServers: { 'my-mcp': { command: 'node' } } }));
+
+        const mock51 = makeCtx({ home: env51.home, dsh: env51.dsh });
+        plugin(mock51.ctx, {});
+        const panel51 = mock51.services.find((s) => s.name === 'backupPanel');
+
+        const src = await panel51.foreignSources();
+        ok(src.ok === true && src.sources.some((s) => s.id === 'claude-code' && s.detected === true), '51 检测到 Claude Code');
+        const cc = src.sources.find((s) => s.id === 'claude-code');
+        ok(cc.skills === 1 && cc.instructions === '.claude/CLAUDE.md', '51 技能/指令计数正确');
+        ok(cc.mcpServers.length === 1 && String(cc.mcpServers[0]).includes('my-mcp'), '51 MCP 服务器检测并报告');
+        ok(src.sources.find((s) => s.id === 'cursor').detected === false, '51 未安装来源 detected=false');
+
+        const pv = await panel51.foreignPreview({ source: 'claude-code' });
+        ok(pv.ok === true && pv.preview && pv.preview.ok === true, '51 预览返回导入计划');
+        ok(pv.report.mcpServers.length === 1, '51 预览报告含 MCP');
+        ok(!(await fs.stat(path.join(env51.dsh, 'skills')).then(() => true, () => false)), '51 预览不写 ~/.dsh');
+
+        const dry = await panel51.foreignImport({ source: 'claude-code' });
+        ok(dry.ok === true && dry.dryRun === true, '51 导入默认 dry-run');
+        ok(!(await fs.stat(path.join(env51.dsh, 'skills')).then(() => true, () => false)), '51 dry-run 不写盘');
+
+        const r = await panel51.foreignImport({ source: 'claude-code', confirm: true });
+        ok(r.ok === true && r.dryRun === false, '51 导入执行');
+        ok(await fs.readFile(path.join(env51.dsh, 'skills', 'demo-skill', 'SKILL.md'), 'utf8') === '# demo skill', '51 技能已写入 ~/.dsh/skills');
+        ok(await fs.readFile(path.join(env51.dsh, 'AGENTS.md'), 'utf8') === '# global instructions', '51 全局指令写入 AGENTS.md');
+      } finally {
+        await rmTemp(env51.dir);
+      }
+    }
+
+    console.log('52) 会话 Rewind v1：预览/分叉，原会话零改动（zstd 会话日志）');
+    {
+      if (typeof zlib.zstdCompressSync !== 'function') {
+        ok(true, '52 跳过（运行时 Node 无内置 zstd，需 ≥22.15/23.8）');
+      } else {
+        const env52 = await mkTmpHome();
+        try {
+          const projDir = path.join(env52.dsh, 'sessions', '--tmp-proj--');
+          const sessDir = path.join(projDir, 'sess-rewind');
+          await fs.mkdir(sessDir, { recursive: true });
+          const header = { type: 'session', version: 4, id: 'sess-rewind', createdAt: 1724544000000, cwd: '/tmp/proj', delegationDepth: 0, isSeeded: true };
+          const recs = [
+            JSON.stringify({ type: 'user/message', seq: 0, time: 1000, data: { id: 'm0', role: 'user', content: [], source: { kind: 'user' } } }),
+            JSON.stringify({ type: 'assistant/message', seq: 1, time: 2000, data: { id: 'm1', role: 'assistant', content: [] } }),
+            JSON.stringify({ type: 'user/message', seq: 2, time: 3000, data: { id: 'm2', role: 'user', content: [], source: { kind: 'user' } } }),
+            JSON.stringify({ type: 'assistant/message', seq: 3, time: 4000, data: { id: 'm3', role: 'assistant', content: [] } }),
+          ];
+          const logPath = path.join(sessDir, 'session.v4.jsonl.zstd');
+          const logBuf = Buffer.concat([
+            zlib.zstdCompressSync(Buffer.from(`${JSON.stringify(header)}\n`)),
+            zlib.zstdCompressSync(Buffer.from(`${recs.join('\n')}\n`)),
+          ]);
+          await fs.writeFile(logPath, logBuf);
+
+          const mock52 = makeCtx({ home: env52.home, dsh: env52.dsh });
+          plugin(mock52.ctx, {});
+          const panel52 = mock52.services.find((s) => s.name === 'backupPanel');
+
+          const list = await panel52.sessionRewindList();
+          ok(list.ok === true && list.sessions.some((s) => s.id === 'sess-rewind'), '52 列出可回退会话');
+
+          const pv = await panel52.sessionRewindPreview('sess-rewind', 2);
+          ok(pv.ok === true && pv.keepRecords === 2 && pv.dropRecords === 2, `52 预览切在 seq=2：保留 2 丢弃 2（实际 ${pv.keepRecords}/${pv.dropRecords}）`);
+          ok((await fs.readdir(projDir)).length === 1, '52 预览不写盘（项目目录仍只有原会话）');
+
+          const dry = await panel52.sessionRewindApply({ session: 'sess-rewind', seq: 2 });
+          ok(dry.ok === true && dry.dryRun === true, '52 apply 默认 dry-run');
+          ok((await fs.readdir(projDir)).length === 1, '52 dry-run 不写盘');
+
+          const before = await fs.readFile(logPath);
+          const ap = await panel52.sessionRewindApply({ session: 'sess-rewind', seq: 2, confirm: true });
+          ok(ap.ok === true && ap.dryRun === false && typeof ap.newId === 'string', '52 分叉执行');
+          const after = await fs.readFile(logPath);
+          ok(before.equals(after), '52 原会话字节未改动');
+
+          const entries = await fs.readdir(projDir);
+          ok(entries.length === 2 && entries.includes(ap.newId), '52 新会话目录已创建');
+
+          const list2 = await panel52.sessionRewindList();
+          ok(list2.sessions.some((s) => s.id === ap.newId), '52 新会话 header 可被解析并列出');
+          const pv2 = await panel52.sessionRewindPreview(ap.newId, 999);
+          ok(pv2.ok === true && pv2.keepRecords === 2, `52 新会话含 2 条保留记录（实际 ${pv2.keepRecords}）`);
+        } finally {
+          await rmTemp(env52.dir);
+        }
+      }
+    }
+
+    console.log('53) 外部聊天记录导入 v1：Claude Code → DSH v4 会话');
+    {
+      if (typeof zlib.zstdCompressSync !== 'function') {
+        ok(true, '53 跳过（运行时 Node 无内置 zstd，需 ≥22.15/23.8）');
+      } else {
+        const env53 = await mkTmpHome();
+        try {
+          const claudeDir = path.join(env53.home, '.claude', 'projects', '-Users-xiao-proj');
+          await fs.mkdir(claudeDir, { recursive: true });
+          const claudeFile = path.join(claudeDir, 'sess-abc123.jsonl');
+          const lines53 = [
+            JSON.stringify({ type: 'user', timestamp: '2026-01-01T00:00:00.000Z', message: { role: 'user', content: [{ type: 'text', text: '你好' }] } }),
+            JSON.stringify({ type: 'assistant', timestamp: '2026-01-01T00:00:05.000Z', message: { role: 'assistant', content: [{ type: 'text', text: '你好，有什么可以帮你？' }, { type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/tmp/a.txt' } }] } }),
+            JSON.stringify({ type: 'user', timestamp: '2026-01-01T00:00:06.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'file body' }] } }),
+            JSON.stringify({ type: 'summary', summary: 'x' }),
+          ];
+          await fs.writeFile(claudeFile, lines53.join('\n'));
+          const before53 = await fs.readFile(claudeFile);
+
+          const mock53 = makeCtx({ home: env53.home, dsh: env53.dsh });
+          plugin(mock53.ctx, {});
+          const panel53 = mock53.services.find((s) => s.name === 'backupPanel');
+          const noCwdDir = path.join(env53.dsh, 'sessions', '_no-cwd');
+
+          const src53 = await panel53.chatSources();
+          ok(src53.ok === true && src53.detected === true && src53.sessions.length === 1, `53 检测到 Claude Code 会话（实际 ${src53.sessions.length}）`);
+          const sid = src53.sessions[0].id;
+          ok(src53.sessions[0].messages === 3, `53 解析出 3 条消息（实际 ${src53.sessions[0].messages}）`);
+
+          const pv53 = await panel53.chatPreview({ session: sid });
+          ok(pv53.ok === true && pv53.messages === 3 && pv53.events === 15 && pv53.toolCount === 1, `53 预览：3 消息 / 15 事件（实际 ${pv53.messages}/${pv53.events}）`);
+          ok(pv53.dryRun === true, '53 预览为 dry-run');
+          ok((await fs.stat(noCwdDir).then(() => true, () => false)) === false, '53 预览不写盘');
+
+          const dry53 = await panel53.chatApply({ session: sid });
+          ok(dry53.ok === true && dry53.dryRun === true, '53 apply 默认 dry-run');
+
+          const ap53 = await panel53.chatApply({ session: sid, confirm: true });
+          ok(ap53.ok === true && ap53.dryRun === false, '53 导入执行');
+          ok(await fs.stat(ap53.path).then(() => true, () => false), '53 会话日志已落盘');
+
+          const list53 = await panel53.sessionRewindList();
+          ok(list53.sessions.some((s) => s.id === ap53.newId), '53 新会话可被解析并列出');
+          const pv2_53 = await panel53.sessionRewindPreview(ap53.newId, 999);
+          ok(pv2_53.ok === true && pv2_53.keepRecords === 15, `53 新会话含 15 个导入事件（实际 ${pv2_53.keepRecords}）`);
+          ok((await fs.readFile(claudeFile)).equals(before53), '53 原 Claude 会话文件零改动');
+        } finally {
+          await rmTemp(env53.dir);
+        }
+      }
+    }
+
+    console.log('54) 外部聊天记录导入:Codex rollout → DSH v4 会话');
+    {
+      if (typeof zlib.zstdCompressSync !== 'function') {
+        ok(true, '54 跳过(运行时 Node 无内置 zstd)');
+      } else {
+        const env54 = await mkTmpHome();
+        try {
+          const codexDir = path.join(env54.home, '.codex', 'sessions', '2026', '10', '27');
+          await fs.mkdir(codexDir, { recursive: true });
+          const codexFile = path.join(codexDir, 'rollout-2026-10-27T10-00-00-01a17b45-7a56-71c1-89ec-b09cb3b7bbd7.jsonl');
+          const lines54 = [
+            JSON.stringify({ timestamp: '2026-10-27T02:00:00.000Z', type: 'session_meta', payload: { id: '01a17b45-7a56-71c1-89ec-b09cb3b7bbd7', cwd: '/tmp/codex-proj', cli_version: '0.9.0' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '帮我看看目录' }] } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:02.000Z', type: 'response_item', payload: { type: 'reasoning', summary: [{ type: 'summary_text', text: '先列目录' }], encrypted_content: 'xx' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:03.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '好,我来列一下' }] } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:04.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{"cmd":["ls"]}', call_id: 'call_1' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:05.000Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_1', output: 'a.txt' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:06.000Z', type: 'event_msg', payload: { type: 'token_count', info: {} } }),
+          ];
+          await fs.writeFile(codexFile, lines54.join('\n'));
+          const before54 = await fs.readFile(codexFile);
+
+          const mock54 = makeCtx({ home: env54.home, dsh: env54.dsh });
+          plugin(mock54.ctx, {});
+          const panel54 = mock54.services.find((s) => s.name === 'backupPanel');
+
+          const src54 = await panel54.chatSources();
+          const codexSrc = (src54.sources || []).find((s) => s.id === 'codex');
+          ok(codexSrc?.detected === true && codexSrc?.count === 1, `54 chatSources 检出 Codex(${JSON.stringify(codexSrc)})`);
+          const codexSession = (src54.sessions || []).find((s) => s.source === 'codex');
+          ok(codexSession?.messages === 4, `54 解析出 4 条消息(实际 ${codexSession?.messages})`);
+          ok(String(codexSession?.id || '').startsWith('codex-'), '54 会话 id 带 codex- 前缀');
+
+          const pv54 = await panel54.chatPreview({ source: 'codex', session: codexSession.id });
+          ok(pv54.ok === true && pv54.messages === 4 && pv54.events === 21 && pv54.toolCount === 1, `54 预览:4 消息 / 21 事件(实际 ${pv54.messages}/${pv54.events})`);
+          ok(pv54.dryRun === true && pv54.source === 'codex', '54 预览为 dry-run 且来源=codex');
+
+          const ap54 = await panel54.chatApply({ source: 'codex', session: codexSession.id, confirm: true });
+          ok(ap54.ok === true && ap54.dryRun === false, '54 导入执行');
+          const pv2_54 = await panel54.sessionRewindPreview(ap54.newId, 999);
+          ok(pv2_54.ok === true && pv2_54.keepRecords === 21, `54 新会话含 21 个事件(实际 ${pv2_54.keepRecords})`);
+          ok((await fs.readFile(codexFile)).equals(before54), '54 原 Codex 会话文件零改动');
+
+          const pv54b = await panel54.chatPreview({ session: codexSession.id });
+          ok(pv54b.ok === true && pv54b.source === 'codex', '54 省略 source 时按 id 前缀推断为 codex');
+        } finally {
+          await rmTemp(env54.dir);
+        }
       }
     }
 

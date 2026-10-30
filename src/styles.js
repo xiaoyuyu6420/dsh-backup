@@ -401,4 +401,107 @@ const PANEL_CSS = `
   color: var(--dsw-alias-state-error-primary, #e53e3e);
   line-height: 1.5;
 }
+
+/* ── 三 Tab 导航 ─────────────────────────────────────── */
+[data-dsh-backup] .dsb-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  margin-bottom: 2px;
+}
+[data-dsh-backup] .dsb-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 8px 14px;
+  margin-bottom: -1px;
+  font-weight: 500;
+}
+[data-dsh-backup] .dsb-tabs button:hover:not(:disabled) {
+  color: var(--dsw-alias-label-secondary);
+}
+[data-dsh-backup] .dsb-tabs button.active {
+  color: var(--dsw-alias-label-primary);
+  border-bottom-color: var(--dsw-alias-brand-primary, #4176e6);
+  font-weight: 600;
+}
+
+/* ── 主 CTA / 信息条 ─────────────────────────────────── */
+[data-dsh-backup] .dsb-hero { padding: 18px 18px; }
+[data-dsh-backup] .dsb-btn-big { padding: 11px 20px; font-size: 14px; border-radius: 10px; }
+[data-dsh-backup] .dsb-btn-small { padding: 3px 10px; font-size: 12px; }
+[data-dsh-backup] .dsb-btn-small-ghost {
+  padding: 2px 6px; font-size: 12px; color: var(--dsw-alias-label-tertiary);
+}
+[data-dsh-backup] .dsb-btn-small-ghost:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }
+[data-dsh-backup] .dsb-heading-right { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+[data-dsh-backup] .dsb-mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12px; }
+[data-dsh-backup] .dsb-muted { color: var(--dsw-alias-label-tertiary); }
+[data-dsh-backup] .dsb-info {
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4176e6) 8%, transparent);
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary, #4176e6) 24%, transparent);
+}
+[data-dsh-backup] .dsb-info-text { margin: 0; font-size: 13px; line-height: 1.7; color: var(--dsw-alias-label-secondary); }
+
+/* ── 首次引导步骤 ─────────────────────────────────────── */
+[data-dsh-backup] .dsb-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+[data-dsh-backup] .dsb-step {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+[data-dsh-backup] .dsb-step b { color: var(--dsw-alias-label-primary); font-weight: 600; font-size: 13px; }
+
+/* ── 分类型 chips ─────────────────────────────────────── */
+[data-dsh-backup] .dsb-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+[data-dsh-backup] .dsb-chip {
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: none;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+[data-dsh-backup] .dsb-chip:hover:not(:disabled) { border-color: var(--dsw-alias-label-dimmed); }
+[data-dsh-backup] .dsb-chip.on {
+  border-color: var(--dsw-alias-brand-primary, #4176e6);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #4176e6) 14%, transparent);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* ── 导入预览计划 ─────────────────────────────────────── */
+[data-dsh-backup] .dsb-import-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+/* ── 列表改 flex，主操作「恢复」用 primary，避免动作平分 ── */
+[data-dsh-backup] .dsb-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+[data-dsh-backup] .dsb-item-name { flex: 1 1 auto; min-width: 0; }
+[data-dsh-backup] .dsb-item-actions .dsb-btn-primary { font-size: 12px; padding: 3px 12px; }
+
+@media (max-width: 640px) {
+  [data-dsh-backup] .dsb-item { flex-wrap: wrap; }
+  [data-dsh-backup] .dsb-item-actions { flex-wrap: wrap; }
+  [data-dsh-backup] .dsb-kv { grid-template-columns: 1fr; }
+}
 `;

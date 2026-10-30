@@ -83,7 +83,7 @@ dsh plugin --profile web allow-version @xiaoyuyu6420/dsh-backup@<版本> --dsh-v
 - id: dsh-backup
   name: "@xiaoyuyu6420/dsh-backup"
   config:
-    destination: ~/Desktop/dsh-backups
+    destination: ~/Desktop/DSH Backups
     keep: 7
 ```
 
