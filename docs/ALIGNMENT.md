@@ -16,7 +16,8 @@
 
 ## 2. 现状（已完成，勿重复）
 
-- **0.14.0（本地未发）**：默认目录改名 `~/Desktop/DSH Backups` + 每次备份写「使用说明.txt」+ 旧默认目录同盘自动迁移 + 适配 DSH 0.2.1-rc.2（e2e 70/70、smoke 587、settings 47、client 60）。
+- **0.14.0（已发 npm + GitHub Release）**：默认目录改名 `~/Desktop/DSH Backups` + 每次备份写「使用说明.txt」+ 旧默认目录同盘自动迁移 + 适配 DSH 0.2.1-rc.2（e2e 70/70、smoke 587、settings 47、client 60）。
+- **0.14.1(已发 npm)**:0.14.0 的 npm 包先于 Codex 支持发布 → 0.14.1 补齐 Codex 聊天记录导入(双来源)+ 验收数字同步;代码面与 tag v0.14.0 一致。
 - **面板重构方案 B**：三 Tab（备份/恢复/设置）已落地 [src/tab.jsx](../src/tab.jsx)、[src/locales.js](../src/locales.js)、[src/styles.js](../src/styles.js)；分类型 chips、首启引导、文案去术语、响应式、复制路径、恢复主操作化。`lib/client.js` 已重建。
 
 ## 3. 竞品能力矩阵（对齐依据）
