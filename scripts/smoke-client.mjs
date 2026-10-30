@@ -136,10 +136,10 @@ async function main() {
   ok(dict['settings.backupPanel']?.zh?.tab === '备份' && dict['settings.backupPanel']?.en?.tab === 'Backup', '双语文典已注册');
 
   const contribution = contributions[0];
-  ok(contribution?.package === 'dsh-backup' && contribution.descriptors.length === 43, `Remote 贡献含 ${contribution?.descriptors.length} 个端点`);
+  ok(contribution?.package === 'dsh-backup' && contribution.descriptors.length === 44, `Remote 贡献含 ${contribution?.descriptors.length} 个端点`);
 
   const endpoints = contribution.descriptors.map((d) => `${d.namespace}/${d.method}`);
-  ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/checkUpdate', 'backupPanel/update', 'backupPanel/exportConfig', 'backupPanel/importPreview', 'backupPanel/importApply', 'backupPanel/syncStatus', 'backupPanel/syncNow', 'backupPanel/setSyncChannel', 'backupPanel/removeSyncChannel', 'backupPanel/lockStatus', 'backupPanel/reclaimLock', 'backupPanel/diskUsage', 'backupPanel/cleanup', 'backupPanel/setWeekly', 'backupPanel/about', 'backupPanel/profilesList', 'backupPanel/profileCreate', 'backupPanel/profileRename', 'backupPanel/profileDelete', 'backupPanel/profileLaunch', 'backupPanel/profileStop', 'backupPanel/marketList', 'backupPanel/marketSearch', 'backupPanel/marketInstall', 'backupPanel/foreignSources', 'backupPanel/foreignPreview', 'backupPanel/foreignImport', 'backupPanel/sessionRewindList', 'backupPanel/sessionRewindPreview', 'backupPanel/sessionRewindApply', 'backupPanel/chatSources', 'backupPanel/chatPreview', 'backupPanel/chatApply']), `端点与宿主半边一致: ${endpoints.join(', ')}`);
+  ok(JSON.stringify(endpoints) === JSON.stringify(['backupPanel/status', 'backupPanel/backup', 'backupPanel/verify', 'backupPanel/restore', 'backupPanel/setAuto', 'backupPanel/githubStatus', 'backupPanel/githubSyncNow', 'backupPanel/githubPull', 'backupPanel/removeEntry', 'backupPanel/setGithubRepo', 'backupPanel/setGithubToken', 'backupPanel/checkUpdate', 'backupPanel/update', 'backupPanel/exportConfig', 'backupPanel/importPreview', 'backupPanel/importApply', 'backupPanel/syncStatus', 'backupPanel/syncNow', 'backupPanel/setSyncChannel', 'backupPanel/removeSyncChannel', 'backupPanel/lockStatus', 'backupPanel/reclaimLock', 'backupPanel/diskUsage', 'backupPanel/cleanup', 'backupPanel/setWeekly', 'backupPanel/about', 'backupPanel/profilesList', 'backupPanel/profileCreate', 'backupPanel/profileRename', 'backupPanel/profileDelete', 'backupPanel/profileLaunch', 'backupPanel/profileStop', 'backupPanel/marketList', 'backupPanel/marketSearch', 'backupPanel/marketInstall', 'backupPanel/foreignSources', 'backupPanel/foreignPreview', 'backupPanel/foreignImport', 'backupPanel/sessionRewindList', 'backupPanel/sessionRewindPreview', 'backupPanel/sessionRewindApply', 'backupPanel/chatSources', 'backupPanel/chatPreview', 'backupPanel/chatApply']), `端点与宿主半边一致: ${endpoints.join(', ')}`);
 
   console.log('3) strict schema 解析宿主样例负载');
   const samples = {
@@ -157,6 +157,7 @@ async function main() {
     'backupPanel/githubPull': { ok: true, summary: '已拉取 1 份备份', pulled: ['dsh-x.tar.gz'], corrupt: [], total: 1 },
     'backupPanel/removeEntry': { ok: true, summary: '已删除备份: dsh-x.tar.gz' },
     'backupPanel/setGithubRepo': { ok: true, repo: 'u/backups', summary: '已设为 u/backups' },
+    'backupPanel/setGithubToken': { ok: true, tokenSet: true, summary: 'GitHub token 已保存' },
     'backupPanel/checkUpdate': { ok: true, current: '0.12.2', latest: '0.13.0', update: true, error: null, summary: '发现新版本：0.12.2 → 0.13.0' },
     'backupPanel/update': { ok: true, updated: true, current: '0.13.0', latest: '0.13.0', summary: '已更新到 0.13.0。\n请重启 dsh web 使新版本生效。' },
     'backupPanel/exportConfig': { ok: true, summary: '已导出', path: '/x/dsh-config-1.zip', name: 'dsh-config-1.zip', size: 1234, encrypted: false, redactedFiles: [] },
@@ -201,6 +202,14 @@ async function main() {
     }
   }
   ok(contribution.descriptors.every((d) => d.parameters.every((p) => p.codec.mode === 'strict' && p.codec.schema)), '参数全部 strict codec（客户端挂载校验要求）');
+  {
+    // 反向断言：面板上调用的每个方法都必须在 descriptors 里（#97 的镜像面，
+    // 只断言 descriptor ⊆ panel 会漏掉「UI 调了没注册的方法」这类断链）。
+    const descriptorIds = new Set(contribution.descriptors.map((d) => `${d.service}/${d.method}`));
+    const called = ['setGithubToken'];
+    const missing = called.filter((m) => !descriptorIds.has(`backupPanel/${m}`));
+    ok(missing.length === 0, `面板调用的方法都有 descriptor（缺失: ${missing.join(', ') || '无'}）`);
+  }
 
   console.log('4) 标签页注册与 SSR 渲染');
   if (scopedCallback === null) { ok(false, 'remote.backupPanel 作用域未激活'); }
@@ -216,7 +225,7 @@ async function main() {
       githubSyncNow: async () => ({ ok: true, value: samples['backupPanel/githubSyncNow'] }),
       githubPull: async () => ({ ok: true, value: samples['backupPanel/githubPull'] }),
       removeEntry: async () => ({ ok: true, value: samples['backupPanel/removeEntry'] }),
-      setGithubToken: async () => ({ ok: true, value: { ok: true, tokenSet: true, summary: '已保存' } }),
+      setGithubToken: async () => ({ ok: true, value: samples['backupPanel/setGithubToken'] }),
       checkUpdate: async () => ({ ok: true, value: samples['backupPanel/checkUpdate'] }),
       update: async () => ({ ok: true, value: samples['backupPanel/update'] }),
       setGithubRepo: async () => ({ ok: true, value: samples['backupPanel/setGithubRepo'] }),

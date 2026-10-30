@@ -1,6 +1,6 @@
 {
   "name": "@xiaoyuyu6420/dsh-backup",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "description": "一条命令备份、恢复与迁移 DeepSeek Harness（dsh）的全部数据（~/.dsh：会话、设置、插件、MCP、技能）：定时自动备份、升级前快照、换机迁移、会话日志体检修复、宿主起不来也能用的进程外救援；凭据默认脱敏只存本机。 Backup, restore & migrate all DeepSeek Harness (~/.dsh) data — sessions, settings, plugins, MCP, skills: scheduled backups, pre-upgrade snapshots, cross-machine migration, session-log doctor, out-of-process rescue console; credentials redacted to a local-only vault.",
   "type": "module",
   "packageManager": "pnpm@11.24.0",

@@ -16,8 +16,9 @@
 
 ## 2. 现状（已完成，勿重复）
 
-- **0.14.0（已发 npm + GitHub Release）**：默认目录改名 `~/Desktop/DSH Backups` + 每次备份写「使用说明.txt」+ 旧默认目录同盘自动迁移 + 适配 DSH 0.2.1-rc.2（e2e 70/70、smoke 587、settings 47、client 60）。
+- **0.14.0（已发 npm + GitHub Release）**：默认目录改名 `~/Desktop/DSH Backups` + 每次备份写「使用说明.txt」+ 旧默认目录同盘自动迁移 + 适配 DSH 0.2.1-rc.2（e2e 70/70、smoke 596、settings 47、client 62）。
 - **0.14.1(已发 npm)**:0.14.0 的 npm 包先于 Codex 支持发布 → 0.14.1 补齐 Codex 聊天记录导入(双来源)+ 验收数字同步;代码面与 tag v0.14.0 一致。
+- **0.14.2(复核修复版)**:两轴独立复核(规范/规格)后修复——加密流式 + 原子替换(数据安全)、setGithubToken descriptor + 反向断言、redactSyncChannel 花括号、文案诚实化(Codex/单向推送/Gist 上限/导入预览)、About 反馈入口、rescue --map 需 --yes、移除生产路径测试钩子;smoke 596 / client 62 / e2e 70。
 - **面板重构方案 B**：三 Tab（备份/恢复/设置）已落地 [src/tab.jsx](../src/tab.jsx)、[src/locales.js](../src/locales.js)、[src/styles.js](../src/styles.js)；分类型 chips、首启引导、文案去术语、响应式、复制路径、恢复主操作化。`lib/client.js` 已重建。
 
 ## 3. 竞品能力矩阵（对齐依据）
@@ -97,18 +98,18 @@
 ## 7. 严格验收清单（G7，交付 gate）
 
 - [x] `node scripts/build-client.mjs` 通过（产物与 src 同步的 `git diff --exit-code lib/client.js` 在发布前复核）
-- [x] `node scripts/smoke.mjs`（587/587；Windows 574，36c/45b/47a POSIX 专属）
+- [x] `node scripts/smoke.mjs`（596/596；Windows 583，36c/45b/47a POSIX 专属）
 - [x] `node scripts/smoke-settings.mjs`（47/47）
-- [x] `node scripts/smoke-client.mjs`（60/60）
+- [x] `node scripts/smoke-client.mjs`（62/62）
 - [x] 真机 e2e `node scripts/e2e-host.mjs`（DSH 0.2.1-rc.2，70/70：基线 42 + 加密 7 / Rewind 7 / 外部导入 5 / 聊天导入 9 共 28 项）
 - [x] 兼容矩阵 [docs/compatibility.md](compatibility.md) 更新至当前列车
-- [ ] 人工抽检：安装 → 首启引导 → 立即备份 → 目录/使用说明 → 恢复预览 → 回滚 → 卸载重装
+- [ ] 人工抽检（待用户执行）：安装 → 首启引导 → 立即备份 → 目录/使用说明 → 恢复预览 → 回滚 → 卸载重装
 - [x] 加密包：口令错误拒绝 / 正确解密 / 密文与日志无明文（smoke 38：list 🔒 / verify 免口令 / restore 口令错误人话 / 密文·口令不落盘）
 - [x] 迁移：0.13.x 旧目录（smoke 36a–36d）、旧归档无边车/0.6.x（场景 21）、旧设置 `redact:'none'`（场景 37）三路回归；e2e 70/70
 - [x] 心理化文案/层级逐条对应 §5（README 三条承诺 + 面板首启三步/恢复损失厌恶/备份峰终收尾/删除风险可视化）
 - [x] 会话 Rewind v1：预览/分叉/原会话字节零改动/新会话可解析（smoke 52）；边界：只复制会话日志，不做聊天按钮与工作区文件回滚
-- [ ] 发布门槛：版本号、CHANGELOG、README 中英文、兼容矩阵、npm pack 内容核对（版本 0.14.0 / README / 矩阵已就绪；`npm pack` 内容与 tag 发布待用户确认）
+- [x] 发布门槛：版本号、README 中英文、兼容矩阵、`npm pack` 内容核对（0.14.0 / 0.14.1 / 0.14.2 均已核对；tag 触发 publish workflow 自动发 npm）
 
-> 未全绿不得 tag 发布。
+> 自动化四套全绿 + 发布门槛通过才 tag 发布；「人工抽检」由用户在安装后勾选（0.14.0–0.14.2 的发布依据是自动化全绿 + 用户确认，人工抽检项尚未勾）。
 
 > **P2 加密/导入验收**：清单已落地 [scripts/acceptance-notes.md](../scripts/acceptance-notes.md)，并已转成 `scripts/smoke.mjs` 断言——加密四项硬验收（list 🔒 / verify 免口令 / restore 口令错误人话 / 密文·口令不落盘）在场景 38，导出/导入全链路（export → importPreview 冲突 → importApply keep/overwrite + 快照 + 错口令拒绝）在场景 39。
