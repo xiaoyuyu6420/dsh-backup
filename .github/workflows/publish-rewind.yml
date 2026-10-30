@@ -1,0 +1,57 @@
+name: Publish dsh-rewind (dispatch)
+
+# 临时通道:用本仓库已有的 NPM_TOKEN secret 发布另一个包的版本。
+# 存在理由:账号 2FA 设备丢失、本地 npm 凭据不可恢复,而本仓库的 token 是
+# 绕过 2FA 的自动化 token(GitHub secret 只写不可读,拷不到别的仓库)。
+# 不改动本仓库任何发布路径:只在 workflow_dispatch 时运行,不响应 tag。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'dsh-rewind 的 git ref(分支/tag/sha)'
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-rewind
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: xiaoyuyu6420/dsh-rewind
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Syntax check
+        run: node --check index.js && node --check client.js
+
+      - name: Host unit tests
+        run: node scripts/test-host.mjs --strict
+
+      - name: Client static guard
+        run: node scripts/check-client-static.mjs --strict
+
+      - name: Publish to npm
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "publishing $name@$version"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already published — nothing to do."
+          else
+            npm publish --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
