@@ -705,6 +705,26 @@ async function main() {
       check('宿主解码器严格解码导入会话(15 事件)', cHost.events === 15, JSON.stringify(cHost).slice(0, 200));
       check('宿主表面投影为 user/assistant/tool', cHost.roles.join(',') === 'user,assistant,tool', JSON.stringify(cHost.roles).slice(0, 160));
 
+      // 4b) Codex rollout → 新会话
+      const codexDir = path.join(home, '.codex', 'sessions', '2026', '10', '27');
+      fs.mkdirSync(codexDir, { recursive: true });
+      fs.writeFileSync(path.join(codexDir, 'rollout-2026-10-27T10-00-00-01a17b45-7a56-71c1-89ec-b09cb3b7bbd7.jsonl'), [
+        JSON.stringify({ timestamp: '2026-10-27T02:00:00.000Z', type: 'session_meta', payload: { id: 'x', cwd: '/tmp/codex-proj' } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'look at dir' }] } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:02.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:03.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{"cmd":["ls"]}', call_id: 'call_1' } }),
+        JSON.stringify({ timestamp: '2026-10-27T02:00:04.000Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_1', output: 'a.txt' } }),
+      ].join('\n'));
+      const cSrc2 = await rpc('chatSources');
+      const codexMeta = (cSrc2?.sources ?? []).find((s) => s.id === 'codex');
+      check('chatSources 检出 Codex 会话', codexMeta?.detected === true && codexMeta?.count === 1, JSON.stringify(cSrc2?.sources ?? []).slice(0, 200));
+      const codexEntry = (cSrc2?.sessions ?? []).find((s) => s.source === 'codex');
+      const cApply2 = await rpc('chatApply', { options: { source: 'codex', session: codexEntry?.id, confirm: true } });
+      check('Codex 会话导入为新会话', cApply2?.ok === true && fs.existsSync(String(cApply2?.path ?? '')), JSON.stringify(cApply2).slice(0, 200));
+      const cHost2 = cApply2?.ok === true ? await decodeWithHost(cApply2.path) : { events: -1, roles: [] };
+      check('宿主严格解码 Codex 导入(16 事件)', cHost2.events === 16, JSON.stringify(cHost2).slice(0, 200));
+      check('宿主表面投影 Codex 消息', cHost2.roles.join(',') === 'user,assistant,tool', JSON.stringify(cHost2.roles).slice(0, 160));
+
       // 5) seeded 会话分叉:修正 isSeeded 不变量后必须仍能被宿主打开
       const seedDir = path.join(home, 'sessions', '--e2e-seed--', 'sess-seed');
       fs.mkdirSync(seedDir, { recursive: true });

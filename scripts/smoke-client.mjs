@@ -187,7 +187,7 @@ async function main() {
     'backupPanel/sessionRewindList': { ok: true, sessions: [{ id: 'sess-1', rel: 'sessions/--p--/sess-1/session.v4.jsonl.zstd', file: 'session.v4.jsonl.zstd', cwd: '/tmp/p', version: 4 }], summary: '找到 1 个可回退会话' },
     'backupPanel/sessionRewindPreview': { ok: true, session: 'sess-1', targetSeq: 2, keepRecords: 2, dropRecords: 2, newId: 'sess-1-rewind-1', newPath: '/x/sess-1-rewind-1/session.v4.jsonl.zstd', warnings: [], summary: '回退预览' },
     'backupPanel/sessionRewindApply': { ok: true, dryRun: false, session: 'sess-1', newId: 'sess-1-rewind-1', newPath: '/x/sess-1-rewind-1/session.v4.jsonl.zstd', keepRecords: 2, summary: '已分叉' },
-    'backupPanel/chatSources': { ok: true, source: 'claude-code', detected: true, sessions: [{ id: 'claude-p-abc', file: 'a.jsonl', project: '-p', messages: 3, title: 'hello' }], summary: '检测到 1 个会话' },
+    'backupPanel/chatSources': { ok: true, detected: true, sources: [{ id: 'claude-code', label: 'Claude Code', detected: true, count: 1 }, { id: 'codex', label: 'Codex', detected: false, count: 0 }], sessions: [{ source: 'claude-code', id: 'claude-p-abc', file: 'a.jsonl', project: '-p', messages: 3, title: 'hello' }], summary: '检测到 1 个会话' },
     'backupPanel/chatPreview': { ok: true, dryRun: true, source: 'claude-code', session: 'claude-p-abc', messages: 3, userCount: 1, asstCount: 1, toolCount: 1, skipped: 1, events: 15, newId: 'claude-p-abc-1', warnings: ['仅文本'], summary: '导入预览' },
     'backupPanel/chatApply': { ok: true, dryRun: false, newId: 'claude-p-abc-1', path: '/x/sessions/_no-cwd/claude-p-abc-1/session.v4.jsonl.zstd', messages: 3, events: 15, summary: '已导入' },
   };

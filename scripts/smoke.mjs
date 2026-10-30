@@ -3086,6 +3086,57 @@ async function main() {
       }
     }
 
+    console.log('54) 外部聊天记录导入:Codex rollout → DSH v4 会话');
+    {
+      if (typeof zlib.zstdCompressSync !== 'function') {
+        ok(true, '54 跳过(运行时 Node 无内置 zstd)');
+      } else {
+        const env54 = await mkTmpHome();
+        try {
+          const codexDir = path.join(env54.home, '.codex', 'sessions', '2026', '10', '27');
+          await fs.mkdir(codexDir, { recursive: true });
+          const codexFile = path.join(codexDir, 'rollout-2026-10-27T10-00-00-01a17b45-7a56-71c1-89ec-b09cb3b7bbd7.jsonl');
+          const lines54 = [
+            JSON.stringify({ timestamp: '2026-10-27T02:00:00.000Z', type: 'session_meta', payload: { id: '01a17b45-7a56-71c1-89ec-b09cb3b7bbd7', cwd: '/tmp/codex-proj', cli_version: '0.9.0' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:01.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '帮我看看目录' }] } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:02.000Z', type: 'response_item', payload: { type: 'reasoning', summary: [{ type: 'summary_text', text: '先列目录' }], encrypted_content: 'xx' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:03.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '好,我来列一下' }] } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:04.000Z', type: 'response_item', payload: { type: 'function_call', name: 'shell', arguments: '{"cmd":["ls"]}', call_id: 'call_1' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:05.000Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_1', output: 'a.txt' } }),
+            JSON.stringify({ timestamp: '2026-10-27T02:00:06.000Z', type: 'event_msg', payload: { type: 'token_count', info: {} } }),
+          ];
+          await fs.writeFile(codexFile, lines54.join('\n'));
+          const before54 = await fs.readFile(codexFile);
+
+          const mock54 = makeCtx({ home: env54.home, dsh: env54.dsh });
+          plugin(mock54.ctx, {});
+          const panel54 = mock54.services.find((s) => s.name === 'backupPanel');
+
+          const src54 = await panel54.chatSources();
+          const codexSrc = (src54.sources || []).find((s) => s.id === 'codex');
+          ok(codexSrc?.detected === true && codexSrc?.count === 1, `54 chatSources 检出 Codex(${JSON.stringify(codexSrc)})`);
+          const codexSession = (src54.sessions || []).find((s) => s.source === 'codex');
+          ok(codexSession?.messages === 4, `54 解析出 4 条消息(实际 ${codexSession?.messages})`);
+          ok(String(codexSession?.id || '').startsWith('codex-'), '54 会话 id 带 codex- 前缀');
+
+          const pv54 = await panel54.chatPreview({ source: 'codex', session: codexSession.id });
+          ok(pv54.ok === true && pv54.messages === 4 && pv54.events === 21 && pv54.toolCount === 1, `54 预览:4 消息 / 21 事件(实际 ${pv54.messages}/${pv54.events})`);
+          ok(pv54.dryRun === true && pv54.source === 'codex', '54 预览为 dry-run 且来源=codex');
+
+          const ap54 = await panel54.chatApply({ source: 'codex', session: codexSession.id, confirm: true });
+          ok(ap54.ok === true && ap54.dryRun === false, '54 导入执行');
+          const pv2_54 = await panel54.sessionRewindPreview(ap54.newId, 999);
+          ok(pv2_54.ok === true && pv2_54.keepRecords === 21, `54 新会话含 21 个事件(实际 ${pv2_54.keepRecords})`);
+          ok((await fs.readFile(codexFile)).equals(before54), '54 原 Codex 会话文件零改动');
+
+          const pv54b = await panel54.chatPreview({ session: codexSession.id });
+          ok(pv54b.ok === true && pv54b.source === 'codex', '54 省略 source 时按 id 前缀推断为 codex');
+        } finally {
+          await rmTemp(env54.dir);
+        }
+      }
+    }
+
     console.log(`\n结果: ${checks - failures}/${checks} 通过`);
     if (failures) process.exitCode = 1;
   } finally {

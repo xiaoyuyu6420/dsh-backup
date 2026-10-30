@@ -339,15 +339,22 @@ const sessionRewindApplySchema = z.object({
  * 两者指向同一 zod 实例——两代宿主各取所需，行为一致。 */
 // P4c: external chat-history import (Claude Code -> DSH session).
 const chatSessionSchema = z.object({
+  source: z.string().optional(),
   id: z.string(),
   file: z.string().optional(),
   project: z.string().optional(),
   messages: z.number().int().optional(),
   title: z.string().optional(),
 });
+const chatSourceSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  detected: z.boolean().optional(),
+  count: z.number().int().optional(),
+});
 const chatSourcesSchema = z.object({
   ok: z.boolean(),
-  source: z.string().optional(),
+  sources: z.array(chatSourceSchema).optional(),
   detected: z.boolean().optional(),
   sessions: z.array(chatSessionSchema).optional(),
   summary: z.string(),

@@ -112,6 +112,7 @@ export function BackupTab({ panel, t }) {
   const [rewindSessions, setRewindSessions] = useState(null);
   const [rewindPlan, setRewindPlan] = useState(null);
   const [chatSessions, setChatSessions] = useState(null);
+  const [chatSourceMeta, setChatSourceMeta] = useState([]);
   const [chatPlan, setChatPlan] = useState(null);
   const [chatBusyId, setChatBusyId] = useState('');
   const [rewindSeq, setRewindSeq] = useState('');
@@ -433,30 +434,34 @@ export function BackupTab({ panel, t }) {
     try {
       const r = await panel.chatSources();
       setBanner({ ok: r.ok !== false, text: r.summary || '' });
-      if (r.ok !== false) setChatSessions(r.sessions || []);
+      if (r.ok !== false) {
+        setChatSessions(r.sessions || []);
+        setChatSourceMeta(r.sources || []);
+      }
     } catch (err) {
       setBanner({ ok: false, text: String(err && err.message ? err.message : err) });
     } finally {
       setBusy('');
     }
   };
-  const previewChat = async (id) => {
+  const previewChat = async (entry) => {
+    const id = entry.id;
     setChatBusyId(`preview:${id}`);
     setChatPlan(null);
     try {
-      const r = await panel.chatPreview({ session: id });
+      const r = await panel.chatPreview({ source: entry.source, session: id });
       setBanner({ ok: r.ok !== false, text: r.summary || '' });
-      if (r.ok !== false) setChatPlan({ session: id, ...r });
+      if (r.ok !== false) setChatPlan({ session: id, source: entry.source, ...r });
     } catch (err) {
       setBanner({ ok: false, text: String(err && err.message ? err.message : err) });
     } finally {
       setChatBusyId('');
     }
   };
-  const confirmChat = async (id) => {
-    setChatBusyId(`import:${id}`);
+  const confirmChat = async (plan) => {
+    setChatBusyId(`import:${plan.session}`);
     try {
-      const r = await panel.chatApply({ session: id, confirm: true });
+      const r = await panel.chatApply({ source: plan.source, session: plan.session, confirm: true });
       setBanner({ ok: r.ok !== false, text: r.summary || '' });
       setChatPlan(null);
     } catch (err) {
@@ -1161,9 +1166,9 @@ export function BackupTab({ panel, t }) {
                     {chatSessions.map((s) => (
                       <li className="dsb-item" key={s.id}>
                         <span className="dsb-item-name">{s.title || s.file || s.id}</span>
-                        <span className="dsb-item-meta">{`${s.messages ?? 0} ${t('chatMessages')}${s.project ? ` · ${s.project}` : ''}`}</span>
+                        <span className="dsb-item-meta">{`${(chatSourceMeta.find((m) => m.id === s.source) || {}).label ?? s.source ?? ''} · ${s.messages ?? 0} ${t('chatMessages')}${s.project ? ` · ${s.project}` : ''}`}</span>
                         <span className="dsb-item-actions">
-                          <button type="button" className="dsb-btn-secondary" disabled={busy !== '' || chatBusyId !== ''} onClick={() => previewChat(s.id)}>
+                          <button type="button" className="dsb-btn-secondary" disabled={busy !== '' || chatBusyId !== ''} onClick={() => previewChat(s)}>
                             {chatBusyId === `preview:${s.id}` ? t('busy') : t('chatPreview')}
                           </button>
                         </span>
@@ -1178,7 +1183,7 @@ export function BackupTab({ panel, t }) {
                     <p className="dsb-status">{chatPlan.summary}</p>
                     {(chatPlan.warnings || []).map((w) => <p className="dsb-hint" key={w}>{w}</p>)}
                     <div className="dsb-row">
-                      <button type="button" className="dsb-btn-primary" disabled={chatBusyId !== ''} onClick={() => confirmChat(chatPlan.session)}>
+                      <button type="button" className="dsb-btn-primary" disabled={chatBusyId !== ''} onClick={() => confirmChat(chatPlan)}>
                         {t('chatConfirmImport')}
                       </button>
                       <button type="button" className="dsb-btn-secondary" disabled={chatBusyId !== ''} onClick={() => setChatPlan(null)}>

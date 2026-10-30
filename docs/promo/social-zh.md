@@ -19,7 +19,7 @@ dsh-backup 0.14.0 做了几件事：
 
 面板也重做了：三个 Tab、首启三步引导、主按钮只有一个。装完就知道下一步点哪。
 
-真机验收：DSH 0.2.1-rc.2 上 e2e 66/66，smoke 578/565。MIT 开源。
+真机验收：DSH 0.2.1-rc.2 上 e2e 70/70，smoke 587/565。MIT 开源。
 
 安装：`dsh plugin --profile web add @xiaoyuyu6420/dsh-backup`
 
@@ -49,7 +49,7 @@ dsh-backup 0.14.0 做了几件事：
 
 桌面端在应用里「设置 → 插件 → 添加插件」输包名就行。
 
-真机验收过 DSH 0.2.1-rc.2：e2e 66/66、smoke 578/565。MIT 开源，介意隐私的可以自己审计。
+真机验收过 DSH 0.2.1-rc.2：e2e 70/70、smoke 587/565。MIT 开源，介意隐私的可以自己审计。
 
 #DeepSeekHarness #DSH #数据备份 #效率工具 #开发者工具 #开源
 

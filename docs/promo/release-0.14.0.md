@@ -1,6 +1,6 @@
 # dsh-backup 0.14.0 · 发布说明（GitHub Release 草稿）
 
-> 状态：待发。验收数字：smoke 578 / settings 47 / client 60 / 真机 e2e 59（DSH 0.2.1-rc.2）。
+> 状态：待发。验收数字：smoke 587 / settings 47 / client 60 / 真机 e2e 70（DSH 0.2.1-rc.2）。
 
 ## 一句话
 
@@ -24,8 +24,8 @@
 3. **备份能力**：口令加密备份、单文件 ZIP 导出/导入（节段预览 → 冲突默认保留 → 自动快照 → 失败回滚）、本地 `link:`/`file:` 插件迁移
 4. **同步与运维**：WebDAV / S3 兼容 / Gist 多通道、GFS 月/年保留、操作锁 + 残留锁回收、磁盘占用报告 + 分级清理、每周调度
 5. **生态**：配置市场、从 Claude Code / Cursor / Codex 导入技能与全局指令（MCP 只检测报告）、Profiles 管理、会话 Rewind 分叉、About、agent 工具 6 个、离线 CLI（reinstall / sessions repair / recover-stale-lock）
-6. **兼容**：DSH 0.2.1-rc.2 真机 e2e 66/66；peers/engines 仍覆盖 0.2.1 列车，下一边界 0.3.0
-7. **跨工具聊天记录导入**:把 Claude Code 的会话导入为新的 DSH 会话(扫描 → 预览 → 确认;原数据零改动,仅文本与工具调用/结果)——导入产物经宿主自带解码器严格解码 + 表面投影双重验证
+6. **兼容**：DSH 0.2.1-rc.2 真机 e2e 70/70；peers/engines 仍覆盖 0.2.1 列车，下一边界 0.3.0
+7. **跨工具聊天记录导入**:把 Claude Code / Codex 的会话导入为新的 DSH 会话(扫描 → 预览 → 确认;原数据零改动,仅文本与工具调用/结果)——导入产物经宿主自带解码器严格解码 + 表面投影双重验证
 
 ## 老版本迁移
 
@@ -52,13 +52,13 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 
 | 项 | 结果 |
 |---|---|
-| smoke（宿主零依赖桩）| 578/578（Windows 552）|
+| smoke（宿主零依赖桩）| 587/587（Windows 574）|
 | settings seam | 47/47 |
 | client bundle | 60/60 |
-| 真机 e2e（DSH 0.2.1-rc.2）| 66/66 |
+| 真机 e2e（DSH 0.2.1-rc.2）| 70/70 |
 
 ---
 
 ## English (short)
 
-dsh-backup 0.14.0 — one-command backup, restore and migration for DeepSeek Harness. New: friendlier backup folder (`~/Desktop/DSH Backups`) with an auto-generated guide, three-tab panel, password-encrypted backups, single-file ZIP export/import with preview + rollback, WebDAV / S3-compatible / Gist sync, GFS retention, operation locks, disk-usage cleanup, weekly schedules, config market, import from Claude Code / Cursor / Codex, profiles management, conversation rewind forks, cross-tool chat-history import (Claude Code → new DSH session), an About panel, six agent tools and an offline rescue CLI. Verified: smoke 578 / settings 47 / client 60 / real-host e2e 66 on DSH 0.2.1-rc.2.
+dsh-backup 0.14.0 — one-command backup, restore and migration for DeepSeek Harness. New: friendlier backup folder (`~/Desktop/DSH Backups`) with an auto-generated guide, three-tab panel, password-encrypted backups, single-file ZIP export/import with preview + rollback, WebDAV / S3-compatible / Gist sync, GFS retention, operation locks, disk-usage cleanup, weekly schedules, config market, import from Claude Code / Cursor / Codex, profiles management, conversation rewind forks, cross-tool chat-history import (Claude Code / Codex → new DSH session), an About panel, six agent tools and an offline rescue CLI. Verified: smoke 587 / settings 47 / client 60 / real-host e2e 70 on DSH 0.2.1-rc.2.
