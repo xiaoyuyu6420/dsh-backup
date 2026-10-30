@@ -95,11 +95,12 @@
 
 dsh-backup 是宿主插件——DSH 进程起不来时它也死了。救援通道补的就是这个洞：**每次备份都会往备份目录里写一套进程外自救工具**，只用 Node 内置能力 + 系统 tar，不依赖任何 DSH 组件。DSH 依赖 Node 才能跑，所以宿主坏了 Node 一定活着。
 
-备份目录（默认 `~/Desktop/dsh-backups/`）里躺着：
+备份目录（默认 `~/Desktop/DSH Backups/`，0.14.0 起改名）里躺着：
 
 - **点我恢复.command / .bat / .sh**（按你的系统生成其一）——双击即启动救援网页并自动打开浏览器，全程不用终端
 - **RESCUE.txt**——自救说明，双击文件丢了看这个
 - **rescue.mjs**——零依赖单文件工具本体
+- **使用说明.txt**——整个备份目录的人话版说明书：每个文件是什么、能不能删、恢复走哪三条路（含简短英文段）
 
 救援网页（127.0.0.1，仅本机）：列出备份、逐份校验、恢复（预览 + 确认弹窗，现有数据先快照挪旁）、会话体检与定点修复。
 
@@ -130,7 +131,9 @@ v0.7.0 起每份备份附带 `.meta.json`（机器元数据）与 `.redacted.jso
 
 1. **`settings.yaml`** —— 用户通过 Web 面板保存或 `/dsh-backup/settings` HTTP API 写入；持久化在 `~/.dsh/settings.yaml`，立即生效。
 2. **`cordis.patch.yml`** —— profile 级 `config` 块（传统 DSH 插件配置）；作为 base 层。
-3. **Schema 默认值** —— 内置默认（`destination: ~/Desktop/dsh-backups`、`keep: 7`、`exclude: []`、`redact: [敏感文件默认]`、`githubRepo: ''`）。
+3. **Schema 默认值** —— 内置默认（`destination: ~/Desktop/DSH Backups`、`keep: 7`、`exclude: []`、`redact: [敏感文件默认]`、`githubRepo: ''`）。
+
+> **0.14.0 默认目录改名**：内置默认从 `~/Desktop/dsh-backups` 换成 `~/Desktop/DSH Backups`。从未配置过 `destination` 的用户，升级后首次启动会把旧默认目录**同盘改名**（原子、不拷贝、不丢备份）；迁移失败则继续使用老目录。显式配置过 `destination`（面板保存过、或 `cordis.patch.yml` 写过）的用户完全不受影响。
 
 ### 通过 Web 面板（推荐）
 
@@ -144,7 +147,7 @@ v0.7.0 起每份备份附带 `.meta.json`（机器元数据）与 `.redacted.jso
 - id: dsh-backup
   name: 'dsh-backup'
   config:
-    destination: '~/Backups/dsh'   # 备份存放位置（默认 ~/Desktop/dsh-backups）
+    destination: '~/Backups/dsh'   # 备份存放位置（默认 ~/Desktop/DSH Backups）
     keep: 10                       # 手动备份保留几份（默认 7）；设了以后定时备份也按这个数
     exclude:                       # 额外排除的内容（tar --exclude 语法）
       - '*cache*'

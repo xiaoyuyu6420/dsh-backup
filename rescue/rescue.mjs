@@ -24,7 +24,7 @@
  * 老归档（无边车 v0.6.x）静默降级，与插件一致。
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import http from 'node:http';
@@ -743,6 +743,176 @@ function serve(root, port, autoOpen) {
   return server;
 }
 
+// ---------- 离线 CLI 补全（P4：reinstall / sessions repair / recover-stale-lock） ----------
+
+const LOCK_FILE = '.oplock.json';
+const REINSTALL_CODE_FILE = '.reinstall-code';
+
+/** 与 lib/oplock.js 同语义：仅 ESRCH 判死，EPERM/存活/僵尸一律判活（绝不误踢）。 */
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err && err.code === 'EPERM';
+  }
+}
+
+/** 回收残留死锁（owner 证明已死才回收）。 */
+async function recoverStaleLock(root) {
+  const lockPath = `${root}/${LOCK_FILE}`;
+  let lock;
+  try {
+    lock = JSON.parse(await fs.readFile(lockPath, 'utf8'));
+  } catch (err) {
+    if (err && err.code === 'ENOENT') { console.log('没有操作锁。'); return; }
+    throw new Error(`操作锁读取失败: ${String(err && err.message ? err.message : err)}`);
+  }
+  const pid = Number(lock.pid);
+  if (isPidAlive(pid)) {
+    console.log(`❌ 锁持有进程仍在运行（pid=${pid}, operation=${lock.operation}）——未回收，避免误踢活锁。`);
+    process.exitCode = 1;
+    return;
+  }
+  await fs.rm(lockPath, { force: true });
+  console.log(`✅ 已回收死锁（原 pid=${pid}, operation=${lock.operation}）。`);
+}
+
+/** 重装全局 CLI：卸载 + 重装，6 位确认码门禁（先打印，--code 校验后才执行）。 */
+async function reinstall(root, argv) {
+  const pkgIdx = argv.indexOf('--package');
+  const pkg = pkgIdx >= 0 && argv[pkgIdx + 1] ? argv[pkgIdx + 1] : '@deepseek-ai/dsh';
+  const codeIdx = argv.indexOf('--code');
+  const codeArg = codeIdx >= 0 ? argv[codeIdx + 1] : undefined;
+  const codeFile = `${root}/${REINSTALL_CODE_FILE}`;
+  const npmBin = IS_WIN ? 'npm.cmd' : 'npm';
+  if (!codeArg) {
+    const code = String(randomInt(0, 1000000)).padStart(6, '0');
+    await fs.writeFile(codeFile, `${code}\n`, 'utf8');
+    console.log(`⚠️ 即将重装全局 CLI（${pkg}）：`);
+    console.log(`   1) ${npmBin} uninstall -g ${pkg}`);
+    console.log(`   2) ${npmBin} install -g ${pkg}`);
+    console.log(`   确认码: ${code}`);
+    console.log(`   确认执行: node rescue.mjs reinstall --package ${pkg} --code ${code}`);
+    return;
+  }
+  let expected = '';
+  try { expected = (await fs.readFile(codeFile, 'utf8')).trim(); } catch { expected = ''; }
+  if (!expected || codeArg !== expected) {
+    throw new Error('确认码不匹配或已过期——请重新运行 reinstall 获取新确认码');
+  }
+  await fs.rm(codeFile, { force: true });
+  run([npmBin, 'uninstall', '-g', pkg]);
+  run([npmBin, 'install', '-g', pkg]);
+  console.log(`✅ 已重装全局 CLI: ${pkg}`);
+}
+
+/**
+ * 会话日志首帧 cwd 重定位（P4）：默认 dry-run 只出计划；--fix 才动。
+ *  - --map old=new（可多个）：对 header JSON 的 `cwd` 字段做前缀重写
+ *  - --keep <id>：去重选择器——只处理 header.id === <id> 的会话，重复 id 跳过
+ *  - 原地原子写（临时文件 + rename，目标即原文件，不存在「目标已存在」的覆盖）
+ *  - 失败回滚：写前留档 *.repair-<时间戳>，失败从留档还原
+ * zstd 文件只重写首帧（保持「首帧恰好一行 header」容器契约），其余帧原样保留。
+ */
+async function sessionsRepair(root, dshHome, argv) {
+  const fix = argv.includes('--fix');
+  const keepIdx = argv.indexOf('--keep');
+  const keep = keepIdx >= 0 && argv[keepIdx + 1] ? argv[keepIdx + 1] : undefined;
+  const maps = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--map') {
+      const spec = argv[i + 1] || '';
+      const eq = spec.indexOf('=');
+      if (eq < 0) throw new Error(`--map 需为 old=new 形式，收到 ${spec || '（缺值）'}`);
+      maps.push({ from: spec.slice(0, eq), to: spec.slice(eq + 1) });
+    }
+  }
+  if (!maps.length && keep === undefined) throw new Error('sessions repair 至少需要 --map old=new 或 --keep <id>');
+
+  const files = [];
+  await collectSessionLogs(`${dshHome}/sessions`, '', 0, files);
+  const plans = [];
+  const seenIds = new Set();
+  for (const f of files) {
+    let header = null;
+    let lines = null;
+    try {
+      if (f.abs.endsWith('.zstd')) {
+        ({ lines } = decodeZstdLog(await fs.readFile(f.abs)));
+      } else {
+        lines = (await fs.readFile(f.abs, 'utf8')).split('\n').filter((l) => l.length > 0);
+      }
+      if (lines && lines.length) header = JSON.parse(lines[0]);
+    } catch { header = null; }
+    if (!header || typeof header !== 'object') { plans.push({ rel: f.rel, id: null, status: 'skip', reason: 'header 不可解析' }); continue; }
+    const id = typeof header.id === 'string' ? header.id : null;
+    if (keep !== undefined) {
+      if (id !== keep) { plans.push({ rel: f.rel, id, status: 'skip', reason: `--keep ${keep} 未选中` }); continue; }
+      if (seenIds.has(id)) { plans.push({ rel: f.rel, id, status: 'duplicate', reason: '重复 id（保留首个，跳过）' }); continue; }
+    }
+    seenIds.add(id);
+    const cwd = typeof header.cwd === 'string' ? header.cwd : null;
+    let newCwd = cwd;
+    let changed = false;
+    if (cwd) {
+      for (const m of maps) {
+        if (newCwd.startsWith(m.from)) { newCwd = m.to + newCwd.slice(m.from.length); changed = true; }
+      }
+    }
+    if (changed) plans.push({ rel: f.rel, id, status: 'fix', cwd, newCwd, file: f, lines });
+    else plans.push({ rel: f.rel, id, status: 'unchanged', cwd });
+  }
+
+  const fixable = plans.filter((p) => p.status === 'fix');
+  if (!fix) {
+    console.log(`sessions repair（dry-run，未写入）——扫描 ${files.length} 个会话日志`);
+    for (const p of plans) {
+      if (p.status === 'fix') console.log(`  🔧 ${p.rel}\n     ${p.cwd}\n  →  ${p.newCwd}`);
+      else if (p.status === 'skip') console.log(`  ⏭️ ${p.rel}（${p.reason}）`);
+      else if (p.status === 'duplicate') console.log(`  ⏭️ ${p.rel}（${p.reason}）`);
+      else if (p.status === 'unchanged' && !keep) console.log(`  ✓ ${p.rel}（无变化${p.cwd ? `，cwd=${p.cwd}` : ''}）`);
+    }
+    console.log(fixable.length
+      ? `\n确认后执行: node rescue.mjs sessions repair --fix ${argv.filter((a) => a !== '--fix').join(' ')}`
+      : '\n没有需要修复的 cwd。');
+    return;
+  }
+
+  const stamp = stampNow();
+  const repaired = [];
+  const failed = [];
+  for (const p of fixable) {
+    const backup = `${p.file.abs}.repair-${stamp}`;
+    try {
+      await fs.copyFile(p.file.abs, backup);
+      const newHeaderLine = JSON.stringify({ ...JSON.parse(p.lines[0]), cwd: p.newCwd });
+      let outBuf;
+      if (p.file.abs.endsWith('.zstd')) {
+        const raw = await fs.readFile(p.file.abs);
+        const frames = walkZstdFrames(raw);
+        if (!frames.length) throw new Error('无 zstd 帧');
+        const newHead = zlib.zstdCompressSync(`${newHeaderLine}\n`);
+        outBuf = Buffer.concat([newHead, raw.subarray(frames[0][1])]);
+      } else {
+        const lines = p.lines.slice();
+        lines[0] = newHeaderLine;
+        outBuf = Buffer.from(`${lines.join('\n')}\n`, 'utf8');
+      }
+      const tmp = `${p.file.abs}.tmp-${stampNow()}`;
+      await fs.writeFile(tmp, outBuf);
+      await fs.rename(tmp, p.file.abs);
+      repaired.push(p.rel);
+    } catch (err) {
+      failed.push(`${p.rel}（${String(err && err.message ? err.message : err)}）`);
+      await fs.copyFile(backup, p.file.abs).catch(() => {});
+    }
+  }
+  console.log(repaired.length ? `✅ 已修复 ${repaired.length} 个会话日志的 cwd${failed.length ? `；${failed.length} 个失败已回滚` : ''}` : '没有可修复的 cwd。');
+  if (failed.length) { console.log(`❌ 失败: ${failed.join('; ')}`); process.exitCode = 1; }
+}
+
 // ---------- CLI ----------
 
 const HELP = `dsh-rescue —— dsh-backup 的进程外救援通道（零依赖）
@@ -754,6 +924,9 @@ const HELP = `dsh-rescue —— dsh-backup 的进程外救援通道（零依赖�
   node rescue.mjs restore <前缀|latest> 恢复预览；确认无误后加 --yes 执行
   node rescue.mjs doctor                会话日志体检
   node rescue.mjs doctor --repair [前缀] 从备份定点修复损坏的会话日志
+  node rescue.mjs reinstall [--package <名>] [--code <6位>]  重装全局 CLI（确认码门禁）
+  node rescue.mjs sessions repair [--fix] [--map old=new]... [--keep <id>]  会话首帧 cwd 重定位
+  node rescue.mjs recover-stale-lock    回收残留死锁（owner 已死才回收，不误踢活锁）
   node rescue.mjs serve [--port N]      同无参数：启动救援网页
 
 选项:
@@ -811,6 +984,13 @@ async function main() {
     if (r.corruptCount) process.exitCode = 1;
     return;
   }
+  if (cmd === 'reinstall') return reinstall(root, argv);
+  if (cmd === 'sessions') {
+    const sub = pos[1];
+    if (sub !== 'repair') return console.error(`未知 sessions 子命令: ${sub || '（缺省）'}（支持 repair）\n\n${HELP}`), void (process.exitCode = 1);
+    return sessionsRepair(root, dshHome, argv);
+  }
+  if (cmd === 'recover-stale-lock') return recoverStaleLock(root);
   console.error(`未知命令: ${cmd}\n\n${HELP}`);
   process.exitCode = 1;
 }

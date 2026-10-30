@@ -15,7 +15,7 @@ English | [简体中文](README.md)
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup   # install
 # restart dsh web, then type:
-/backup                                                  # → a verified archive lands in ~/Desktop/dsh-backups/
+/backup                                                  # → a verified archive lands in ~/Desktop/DSH Backups/
 ```
 
 Real output from a fresh v0.9.0 install:
@@ -30,6 +30,12 @@ Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins �
 
 ![Backup panel](docs/assets/panel-backups.png)
 
+**Three promises** (full parity & delivery standard in [ALIGNMENT.md](docs/ALIGNMENT.md)):
+
+- 🔐 **Credentials never leave this machine** — API keys / tokens are redacted by default; plaintext lives only in the local vault. For more, opt into password-encrypted backups (AES-256-GCM).
+- ↩️ **Restore never overwrites silently** — the current data is auto-snapshotted and the write-back is previewed first; a failed restore rolls back automatically.
+- 🧭 **You'll know what to do from the start** — a three-step onboarding plus one plain-sentence explanation per advanced feature; three tabs (Backup / Restore / Settings) with a single primary action: "Back up now".
+
 ## Why you want this
 
 | Fear | What dsh-backup does about it |
@@ -43,12 +49,17 @@ Prefer clicking? There's a visual panel in `dsh web` → Settings → Plugins �
 | "I got a new machine" | GitHub sync: `/backup github pull` fetches remote archives, `restore --sync-deps` reinstalls plugins |
 | "Backups rot silently" | Every archive ships a sha256; `/backup verify all` checks integrity; daily/weekly tiered retention keeps useful history longer |
 | "I'll forget to back up" | `/backup auto 12` — every 12 hours, survives restarts, rotates old copies (default keep 7) |
+| "A new machine means reinstalling everything" | Single-file ZIP **export/import** + local `link:`/`file:` plugin migration; sync over WebDAV / S3-compatible / Gist too |
+| "My config lives in another AI tool" | Import **skills & global instructions** from Claude Code / Cursor / Codex after a preview (MCP detected and reported only) |
+| "I want to go back to an earlier point in a conversation" | Conversation **rewind fork**: branch at a chosen turn while the original stays intact |
+| "Backups are eating my disk" | **Disk-usage report** + tiered cleanup: only regenerable caches and expired backups; snapshots and sync data are never touched |
+| "I want a ready-made community config" | **Config market**: index validation, preview install, supply-chain notes — nothing is written until you confirm |
 
 ![Backup settings](docs/assets/panel-settings.png)
 
 ## Install
 
-Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 trains are all tested; the 0.2.0 train is supported since 0.13.2 — see the [compatibility matrix](docs/compatibility.md) for the current status).
+Requires macOS / Linux / Windows 10+ (ships `tar`) and DSH `0.1.1-rc.2`+ (the 0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 trains are all tested; the 0.2.0 and 0.2.1 trains are supported since 0.13.2 / 0.14.0 — see the [compatibility matrix](docs/compatibility.md) for the current status).
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
@@ -66,7 +77,7 @@ Restart `dsh web` afterwards — the plugin only takes effect after a restart.
 
 1. Install (above) and restart `dsh web`
 2. Type `/backup`
-3. Done — the archive lands in `~/Desktop/dsh-backups/`, timestamped, with a `.sha256` next to it
+3. Done — the archive lands in `~/Desktop/DSH Backups/`, timestamped, with a `.sha256` next to it
 
 Want it on a schedule? `/backup auto 12` (every 12 hours; `off` stops it, `status` checks it).
 
@@ -124,7 +135,10 @@ Don't keep clicking them. Run `/backup migrate-check`: it statically scans all s
 Yes — Windows 10+ with the bundled `tar`. The rescue launcher becomes a `.bat` file.
 
 **Where do backups go by default?**
-`~/Desktop/dsh-backups/` — change it any time in the panel (Settings → Plugins → Backup) or via settings; takes effect immediately, no restart.
+`~/Desktop/DSH Backups/` — change it any time in the panel (Settings → Plugins → Backup) or via settings; takes effect immediately, no restart. Since 0.14.0 the default directory was renamed from the old `~/Desktop/dsh-backups`: users who never configured a destination get the old folder renamed in place on first start (same volume, atomic, no backups lost), while explicitly configured destinations are left untouched.
+
+**What are all those files in the backup folder?**
+Every backup writes a plain-language guide to the folder root (`使用说明.txt`, Chinese with a short English section) explaining the archives, `.sha256` sidecars, rescue kit, `vault/` credentials and `auto.json` — plus the three ways to restore. You'll know what can be deleted and where to start.
 
 ## Feedback
 
@@ -138,6 +152,7 @@ Tried it? Tell us what broke, what's missing, what you liked — it directly sha
 <details>
 <summary>Recent releases</summary>
 
+- **0.14.0** — one big release: backup-folder UX + panel redesign + full capability parity. ① **Directory rename**: default `~/Desktop/dsh-backups` → `~/Desktop/DSH Backups`; users who never configured a destination get the old folder renamed in place on first start (atomic, no lost backups), explicit destinations are untouched, and a failed rename keeps the old folder working; every backup writes `使用说明.txt` (what each file is + three restore paths). ② **Panel redesign**: three tabs (Backup / Restore / Settings), three-step onboarding, typed-backup chips, plain-language copy, responsive. ③ **Backup upgrades**: optional password encryption (scrypt+AES-256-GCM, password never persisted), single-file ZIP export/import (section preview → conflicts keep existing by default → auto snapshot → auto rollback), local `link:`/`file:` plugin migration. ④ **Sync & ops**: WebDAV / S3-compatible / Gist channels, GFS monthly/yearly retention, operation lock + stale-lock reclaim, disk-usage report + tiered cleanup, weekly schedules. ⑤ **Ecosystem**: config market (index validation + preview install + supply-chain notes), import skills & global instructions from Claude Code / Cursor / Codex (MCP detected and reported only), Profiles management (built-ins read-only), conversation rewind fork (original untouched), About panel, agent tools 1→6, cross-tool chat-history import (Claude Code → new DSH session, originals untouched), offline CLI (reinstall / sessions repair / recover-stale-lock). ⑥ **Compatibility & acceptance**: real-host e2e 66/66 on DSH **0.2.1-rc.2**, smoke 578 / settings 47 / client 60 green; also fixed `doctor --repair` on Windows failing because bsdtar refuses to overwrite existing objects (#131) — it now extracts to a staging directory and copies only the targets, leaving non-target files untouched. peers/engines unchanged (`^0.2.0-rc.1` covers the 0.2.1 train, next peer boundary 0.3.0).
 - **0.13.4** — Metadata-only release (**no code or behavior change**): the npm description and keywords now carry the terms people actually search for — migration, moving to a new machine, plugins, MCP, skills, sessions, workspace — so dsh-backup shows up for "upgrade went wrong" and "moving my DSH setup" queries. Features, archive format, settings and RPC are identical to 0.13.3; staying on 0.13.3 behaves exactly the same.
 - **0.13.3** — Three fixes from real user reports plus two self-found defects, all re-verified on four host trains (0.1.5-rc.3 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-alpha.1) with e2e 41/41 each: ① **archives containing attachments could not be restored at all** (#112, @zevs281): DSH's attachment store uses hard links (tar typeflag `h`) while the restore validator only allowed `-`/`d` — full restore, dry-run, typed merge and doctor repair all refused on 0.13.2 and earlier. Hard links are now allowed when both the entry and its target stay inside the backup root (symlinks/devices still rejected). ② **large archives were falsely rejected on restore** (#119, @Yoshino-JF): when the `tar -tvzf` listing exceeds the host subprocess spill cap the host discards the spill file and only the last 8 KB remain; the validator then treats a mid-filename fragment as an unsafe entry and refuses the whole archive (backup succeeds, verify passes, only restore fails). The listing is now consumed as a raw stream line by line (no cap; terminate on the first violation). ③ **doctor/migrate were blind to v4 session logs** (#117, @xiuwufangoc-design): the host moved to format v4 (`session.v4.jsonl.zstd`) in 0.1.7 while filenames and the calibrated generation were hardcoded to generation 0/v3 — scans found nothing. Filenames are now matched by the host's own pattern, the calibrated generation moved to v4, and newer generations only warn. ④ **one-click update could not cross minors** (#115): pnpm `update` only upgrades within the declared range and the receipt claimed success regardless — now `update --latest`, with the actually-installed version read back and verified. ⑤ **migration precheck false alarms** (#113, @zevs281): unknown `source.kind` values are hints now instead of "will not open" verdicts, and the known set is aligned with the host's authoritative tables.
 - **0.13.2** — dsh **0.2.0 train** adaptation: peers/engines gain `^0.2.0-rc.1` (the host rejects incompatible peers at install time since 0.1.7-rc.1); **settings form fixed for 0.1.7+** (the host derives forms from the entry's Config schema and only honors `volatile` fields — the plugin exports `Config` with per-field `.volatile()`); Windows scheduler boot hang fixed (#103: streaming hash + boot grace + persisted attempt anchor); review P2 debt cleared and an in-product Star entry.
@@ -160,7 +175,7 @@ Tried it? Tell us what broke, what's missing, what you liked — it directly sha
 
 ## More
 
-Retention policy, credential redaction internals, GitHub sync, restore safeguards, config reference, troubleshooting, and development notes — in the [advanced guide](docs/advanced.zh.md) (Chinese). Cross-runtime compatibility notes: [compatibility.md](docs/compatibility.md).
+Retention policy, credential redaction internals, GitHub sync, restore safeguards, config reference, troubleshooting, and development notes — in the [advanced guide](docs/advanced.zh.md) (Chinese). Portable install & config: [INSTALL.md](docs/INSTALL.md). Cross-runtime compatibility notes: [compatibility.md](docs/compatibility.md). Full feature-parity and acceptance standard vs. similar tools: [ALIGNMENT.md](docs/ALIGNMENT.md). Release notes & promo copy: [docs/promo/](docs/promo/).
 
 ## Acknowledgements
 

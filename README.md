@@ -15,7 +15,7 @@
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup   # 安装
 # 重启 dsh web，然后输入：
-/backup                                                  # → 一份带校验的备份落在 ~/Desktop/dsh-backups/
+/backup                                                  # → 一份带校验的备份落在 ~/Desktop/DSH Backups/
 ```
 
 v0.9.0 全新安装的真实输出：
@@ -30,6 +30,12 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 
 ![备份面板](docs/assets/panel-backups.png)
 
+**三条承诺**（完整对齐与交付标准见 [ALIGNMENT.md](docs/ALIGNMENT.md)）：
+
+- 🔐 **凭据不离开本机** —— API Key / Token 默认脱敏，明文只留在本机 vault；要更强，可选口令加密备份（AES-256-GCM）。
+- ↩️ **恢复绝不静默覆盖** —— 恢复前先自动快照当前数据、预览要写入的内容，失败自动回滚。
+- 🧭 **装上就知道怎么用** —— 首屏三步引导 + 每个高级功能一句人话说明；三个 Tab（备份 / 恢复 / 设置），主按钮只有一个「立即备份」。
+
 ## 它替你挡掉哪些事
 
 | 你担心的 | dsh-backup 做的事 |
@@ -43,6 +49,11 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 | 「换新电脑了」 | GitHub 同步：`/backup github pull` 拉回云端备份，`restore --sync-deps` 顺手重装插件 |
 | 「备份悄悄坏了没人知道」 | 每份归档带 sha256，`/backup verify all` 随时体检；每日/每周分级保留，留得住有用的历史 |
 | 「我会忘记备份」 | `/backup auto 12`——每 12 小时自动跑，重启不中断，旧副本自动轮换（默认保留 7 份） |
+| 「换新电脑，插件和配置都要重装」 | 单文件 ZIP **导出/导入** + 本地 link:/file: 插件迁移；也能 WebDAV / S3 兼容 / Gist 多通道同步 |
+| 「想从别的 AI 工具搬过来」 | 从 Claude Code / Cursor / Codex 读取**技能与全局指令**，预览后导入（MCP 只检测报告） |
+| 「想回到对话里的某个时刻」 | 会话 **Rewind 分叉**：从指定轮次开新分支，原会话完整保留 |
+| 「备份把磁盘占满了」 | **磁盘占用报告** + 分级清理：只清可再生缓存/过期备份，快照与同步数据不动 |
+| 「想装社区现成配置」 | **配置市场**：索引校验 + 预览安装 + 供应链提示，逐个确认才写入 |
 
 **遇到具体报错？** 按症状与报错原文查的排错手册：[故障排查](docs/troubleshooting.zh.md)（会话打不开、29 字节空包、面板消失、Token 按钮报错、换机迁移……各条的版本与修法都写明）。
 
@@ -50,7 +61,7 @@ sha256: 8f9ae6322ef782d21554981cf4547220d5bb3e64d7964a883317415ad54e3cbb
 
 ## 安装
 
-要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 列车均已实测，0.2.0 列车自 0.13.2 起支持；当前兼容状态见 [兼容性矩阵](docs/compatibility.md)）。
+要求：macOS / Linux / Windows 10+（自带 `tar`），DSH `0.1.1-rc.2`+（0.1.1 / 0.1.2 / 0.1.5 / 0.1.6 / 0.1.7 列车均已实测，0.2.0 / 0.2.1 列车分别自 0.13.2 / 0.14.0 起支持；当前兼容状态见 [兼容性矩阵](docs/compatibility.md)）。
 
 ```sh
 dsh plugin --profile web add @xiaoyuyu6420/dsh-backup
@@ -68,7 +79,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 
 1. 按上面装好插件，重启 `dsh web`
 2. 输入 `/backup`
-3. 搞定 —— 备份出现在 `~/Desktop/dsh-backups/`，文件名带时间戳，旁边一份 `.sha256`
+3. 搞定 —— 备份出现在 `~/Desktop/DSH Backups/`，文件名带时间戳，旁边一份 `.sha256`
 
 想定时自动跑？`/backup auto 12`（每 12 小时一次；`off` 关闭，`status` 看状态）。
 
@@ -126,7 +137,10 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 支持——Windows 10+（用系统自带 `tar`），救援启动器是 `.bat` 文件。
 
 **备份默认放哪？**
-`~/Desktop/dsh-backups/`——在面板（设置 → 插件 → 备份）里随时可改，立即生效不用重启。
+`~/Desktop/DSH Backups/`——在面板（设置 → 插件 → 备份）里随时可改，立即生效不用重启。0.14.0 起默认目录由旧的 `~/Desktop/dsh-backups` 改名而来：从未配置过备份目录的用户，升级后首次启动会把旧目录自动改名（同盘、原子、不丢备份）；显式配置过目录的一律不动。
+
+**备份目录里那些文件都是什么？**
+每次备份会在目录根写一份「使用说明.txt」，逐个解释归档、`.sha256` 校验边车、救援工具、`vault/` 凭据、`auto.json` 状态，以及恢复的三条路。第一次打开文件夹看完就知道哪个能删、恢复从哪下手。
 
 ## 反馈
 
@@ -140,6 +154,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 <details>
 <summary>最近的版本</summary>
 
+- **0.14.0** —— 一次大版本：备份目录 UX + 面板重构 + 与同类方案对齐的完整能力。① **目录改名**：默认 `~/Desktop/dsh-backups` → `~/Desktop/DSH Backups`，从未配置过 destination 的用户升级后首次启动同盘自动改名（原子、不丢备份），显式配置不动，失败继续用旧目录；每次备份在根目录写「使用说明.txt」（每个文件是什么 + 三条恢复路径）。② **面板重构**：三个 Tab（备份 / 恢复 / 设置）+ 首启三步引导 + 分类型 chips + 文案去术语 + 响应式。③ **备份增强**：可选口令加密（scrypt+AES-256-GCM，口令不落盘）、单文件 ZIP 导出/导入（节段预览 → 冲突默认保留 → 自动快照 → 失败回滚）、本地 link:/file: 插件迁移。④ **同步与运维**：WebDAV / S3 兼容 / Gist 多通道同步、GFS 月/年保留、操作锁 + 残留锁回收、磁盘占用报告 + 分级清理、每周调度。⑤ **生态**：配置市场（索引校验 + 预览安装 + 供应链提示）、从 Claude Code / Cursor / Codex 导入技能与全局指令（MCP 只检测报告）、Profiles 管理（内置只读）、会话 Rewind 分叉（原会话零改动）、About 面板、agent 工具 1→6、跨工具聊天记录导入(Claude Code → 新 DSH 会话,原数据不动)、离线 CLI（reinstall / sessions repair / recover-stale-lock）。⑥ **兼容与验收**：DSH **0.2.1-rc.2** 真机 e2e 66/66，smoke 578 / settings 47 / client 60 全绿；另修复 Windows 上 `doctor --repair` 因 bsdtar 拒绝覆盖同名对象而失败（#131）：改为暂存区解包 + 按目标拷贝，非目标文件零改动。peers/engines 不变（`^0.2.0-rc.1` 覆盖 0.2.1 列车，下一 peer 边界 0.3.0）。
 - **0.13.4** —— 元数据版（**无代码与行为变更**）：npm 描述与关键词对齐检索用词——补入「迁移 / 换机 / 插件 / MCP / 技能 / 会话 / 工作区」等，让"搬家换机、升级翻车"场景的人在 npm 搜索里能找到本插件。功能、归档格式、设置项、RPC 与 0.13.3 完全一致；升级到本版与停留在 0.13.3 在行为上没有任何区别。
 - **0.13.3** —— 三条真实用户报障的修复 + 两个自建缺陷修复，全部在四条宿主列车（0.1.5-rc.3 / 0.1.7-rc.2 / 0.2.0-rc.2 / 0.2.1-alpha.1）真机 e2e 各 41/41 复验：① **含附件的归档恢复全链路不可用**（#112，@zevs281）：DSH 附件库用硬链接（tar 记为 `h` 条目），而恢复校验器只放行 `-`/`d`——0.13.2 及更早对这类归档的完整恢复/dry-run/分类型合并/doctor 修复一律拒绝。修法：条目与目标都在备份根内的硬链接放行（符号链接、设备仍拒）。② **大归档恢复被误拒**（#119，@Yoshino-JF）：归档清单超过宿主 subprocess 的 spill 上限时宿主会**丢弃 spill 文件**、只留 8 KB 尾窗，校验器把"断在文件名中间的碎片"当成不安全条目 → 整包拒绝（备份成功、verify 报完整、只在恢复时炸）。修法：清单改走原始流逐行校验（无上限，发现违规立即终止）。③ **doctor/migrate 看不见 v4 会话日志**（#117，@xiuwufangoc-design）：宿主 0.1.7 起会话格式为 v4（`session.v4.jsonl.zstd`），而文件名与校准代写死到第 0 代/v3——体检与迁移预检一份都扫不到。修法：按宿主同源形态匹配文件名、校准代推进到 v4、更新代只提示。④ **一键更新跨不过 minor**（#115）：pnpm `update` 只在声明范围内升级，跨 minor 停在旧版且回执谎报成功。修法：`update --latest` + 跑完读回 profile 内真实版本核对。⑤ **迁移预检误报**（#113，@zevs281）：未知 `source.kind` 从"判打不开"降级为提示，名单对齐宿主权威集合（真机曾把 81/82 份健康日志误报）。
 - **0.13.2** —— 适配 dsh **0.2.0 列车**：peers/engines 追加 `^0.2.0-rc.1`（宿主自 0.1.7-rc.1 起有安装期兼容闸门，不覆盖会被拒绝安装）；**修复 0.1.7 起失效的设置表单**（宿主改从条目 Config schema 派生表单且只认 `volatile` 字段——本插件导出 `Config` 并逐字段 `.volatile()`，设置卡片恢复可读可写）；修复 Windows 调度器启动卡死（#103：流式哈希 + 启动宽限 + 尝试锚点落盘）；review P2 债清偿与产品内 Star 入口。
@@ -162,7 +177,7 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 
 ## 更多
 
-定时备份策略、敏感文件脱敏、GitHub 同步、恢复保护机制、配置参考、故障排查、开发说明——都在[进阶文档](docs/advanced.zh.md)。跨运行时兼容性说明：[compatibility.md](docs/compatibility.md)。
+定时备份策略、敏感文件脱敏、GitHub 同步、恢复保护机制、配置参考、故障排查、开发说明——都在[进阶文档](docs/advanced.zh.md)。便携安装与配置：[INSTALL.md](docs/INSTALL.md)。跨运行时兼容性说明：[compatibility.md](docs/compatibility.md)。与同类方案的完整能力对齐与验收标准：[ALIGNMENT.md](docs/ALIGNMENT.md)。发布说明与宣发物料：[docs/promo/](docs/promo/)。
 
 ## 致谢
 
