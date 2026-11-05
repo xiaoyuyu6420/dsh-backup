@@ -235,6 +235,7 @@ await test('plain ZIP and tar consistently redact nested, custom, and legacy ret
 
 await test('credential import rollback copies remain private and outside exported data', async () => {
   const t = await setup();
+  await fs.chmod(`${t.dsh}/.credentials.yaml`, 0o644);
   const sourcePath = await bundle(t, { entries: [{ name: '.credentials.yaml', data: Buffer.from('version: 1\nkey: imported\n') }] });
   const r = await t.panel.importApply({ sourcePath, sections: ['credentials'], decisions: { '.credentials.yaml': 'overwrite' } });
   assert.equal(r.ok, true, r.summary);
@@ -251,6 +252,7 @@ await test('credential merge retention stays in vault and never enters later arc
   const t = await setup();
   const b = await t.panel.backup(7, ['credentials']);
   await fs.writeFile(`${t.dsh}/.credentials.yaml`, 'version: 1\nkey: CURRENT-SECRET\n');
+  await fs.chmod(`${t.dsh}/.credentials.yaml`, 0o644);
   const r = await t.panel.restore(path.basename(b.path), false, ['credentials']);
   assert.equal(r.ok, true, r.summary);
   assert.ok(r.kept.every((p) => p.startsWith(`${t.root}/vault/preserved/`)));
