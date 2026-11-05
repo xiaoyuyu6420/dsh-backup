@@ -508,6 +508,17 @@ async function restoreArchive(root, selector, apply) {
     return { dryRun: true, archive: picked.name, files: entries.length, sample: entries.slice(0, 12), preflight, profileDirs };
   }
 
+  // Keep this standalone rescue script dependency-free. A nested backup root
+  // would disappear when the source tree is moved aside during replacement.
+  const sourceReal = await fs.realpath(dshHome).catch((err) => {
+    if (err.code === 'ENOENT') return path.resolve(dshHome);
+    throw err;
+  });
+  const backupRel = path.relative(sourceReal, await fs.realpath(root));
+  if (!backupRel || (backupRel !== '..' && !backupRel.startsWith(`..${path.sep}`) && !path.isAbsolute(backupRel))) {
+    throw new Error('整包恢复前请把整个备份目录（含 vault）移到 DSH_HOME 外，并更新备份路径；当前备份目录位于待替换的数据目录内');
+  }
+
   // 现有数据：快照 + 挪旁；缺失（新机/全失）则直接解压
   let targetExists = true;
   try {

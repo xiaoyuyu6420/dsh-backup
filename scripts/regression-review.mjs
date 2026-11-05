@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { installSmokeStubs, makeCtx, mkTmpHome, makeTarGz, tarList, rmTemp } from './smoke.mjs';
 import { acquireLock, releaseLock, heartbeatLock } from '../lib/oplock.js';
 import { buildZip, readZipEntry } from '../lib/zip.js';
+import { hostInstallation } from './host-installation.mjs';
 
 await installSmokeStubs();
 const { apply } = await import('../lib/index.js');
@@ -67,6 +68,99 @@ async function bundle(t, { plugin = {}, tar = packageTar(), entries = [] } = {})
   ]);
   return sourcePath;
 }
+
+await test('host decoders and CLI resolve from the selected npm or pnpm installation', async () => {
+  const t = await mkTmpHome(); fixtures.push(t.dir);
+  for (const layout of ['npm-global', 'pnpm']) {
+    const root = `${t.dir}/${layout}/node_modules/@deepseek-ai/dsh`;
+    const base = layout === 'pnpm' ? `${t.dir}/${layout}/store/base` : `${path.dirname(root)}/dsh-base`;
+    const modules = layout === 'pnpm' ? `${base}/node_modules/@deepseek-ai` : path.dirname(root);
+    for (const dir of [root, base, `${modules}/dsh-session`, `${modules}/dsh-session-format-catalog`]) {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(`${dir}/package.json`, JSON.stringify({ name: dir === root ? '@deepseek-ai/dsh' : path.basename(dir), main: 'index.js', version: layout, bin: { dsh: 'bin.js' } }));
+      await fs.writeFile(`${dir}/index.js`, '');
+    }
+    if (layout === 'pnpm') {
+      await fs.mkdir(`${root}/node_modules/@deepseek-ai`, { recursive: true });
+      await fs.symlink(base, `${root}/node_modules/@deepseek-ai/dsh-base`, 'dir');
+    }
+    const resolved = hostInstallation(root);
+    assert.equal(resolved.version, layout);
+    assert.equal(resolved.cli, `${root}/bin.js`);
+    assert.equal(resolved.session, `${modules}/dsh-session/index.js`);
+    assert.equal(resolved.catalog, `${modules}/dsh-session-format-catalog/index.js`);
+  }
+});
+
+await test('nested backup roots stay out of full, typed, encrypted archives and ZIP exports', async () => {
+  // Literal glob characters must not broaden the exclusion to neighbouring data.
+  const t = await setup((t) => ({ destination: `${t.dsh}/skills/back[ups]*?` }));
+  await fs.mkdir(t.root, { recursive: true });
+  await fs.writeFile(`${t.root}/old-backup.tar.gz`, 'previous archive');
+  await fs.mkdir(`${t.root}/vault/preserved`, { recursive: true });
+  await fs.writeFile(`${t.root}/vault/preserved/private.txt`, 'synthetic private data');
+  await fs.mkdir(`${t.dsh}/skills/backuZZ`, { recursive: true });
+  await fs.writeFile(`${t.dsh}/skills/backuZZ/keep.txt`, 'keep me');
+  for (const options of [{}, { types: ['skills'] }, { password: 'synthetic-pass' }]) {
+    const result = await t.panel.backup(undefined, options.types, options.password);
+    assert.equal(result.ok, true, result.summary);
+    if (options.password) {
+      const { decryptFile } = await import('../lib/encrypt.js');
+      const meta = JSON.parse(await fs.readFile(`${result.path}.encrypted.json`, 'utf8'));
+      await decryptFile(result.path, `${t.dir}/plain.tar.gz`, meta, options.password);
+      const names = await tarList(t.dir, 'plain.tar.gz');
+      assert.equal(names.some((n) => n.includes('back[ups]*?')), false);
+    } else {
+      const names = await tarList(t.root, path.basename(result.path));
+      assert.equal(names.some((n) => n.includes('back[ups]*?')), false);
+      assert.ok(names.includes('.dsh/skills/backuZZ/keep.txt'));
+    }
+  }
+  const exp = await t.panel.exportConfig({});
+  assert.equal(exp.ok, true, exp.summary);
+  await assert.rejects(readZipEntry(exp.path, 'skills/back[ups]*?/vault/preserved/private.txt'), /没有条目/);
+  assert.equal((await readZipEntry(exp.path, 'skills/backuZZ/keep.txt')).toString(), 'keep me');
+});
+
+await test('symlink aliases cannot hide a nested destination from archive exclusion', async () => {
+  const t = await setup((t) => ({ destination: `${t.home}/backup-alias` }));
+  await fs.mkdir(`${t.dsh}/nested-backups`, { recursive: true });
+  // setup may have created root while loading automatic state.
+  await fs.rm(t.root, { recursive: true, force: true });
+  await fs.symlink(`${t.dsh}/nested-backups`, t.root, 'dir');
+  await fs.writeFile(`${t.root}/private.txt`, 'synthetic private data');
+  const b = await t.panel.backup();
+  assert.equal(b.ok, true, b.summary);
+  assert.equal((await tarList(t.root, path.basename(b.path))).some((n) => n.includes('nested-backups')), false);
+  const e = await t.panel.exportConfig({});
+  assert.equal(e.ok, true, e.summary);
+  await assert.rejects(readZipEntry(e.path, 'nested-backups/private.txt'), /没有条目/);
+});
+
+await test('a destination equal to DSH_HOME fails instead of creating an empty backup', async () => {
+  const t = await setup((t) => ({ destination: t.dsh }));
+  await assert.rejects(t.panel.backup(), /不能等于 DSH_HOME/);
+  const result = await t.panel.exportConfig({});
+  assert.equal(result.ok, false);
+  assert.match(result.summary, /不能等于 DSH_HOME/);
+});
+
+await test('host and standalone rescue reject destructive replacement with an internal backup root', async () => {
+  const t = await setup((t) => ({ destination: `${t.dsh}/backups` }));
+  const b = await t.panel.backup();
+  assert.equal(b.ok, true, b.summary);
+  const selector = path.basename(b.path);
+  assert.equal((await t.panel.restore(selector, true)).ok, true);
+  const r = await t.panel.restore(selector, false);
+  assert.equal(r.ok, false);
+  assert.match(r.summary, /移到 DSH_HOME 外/);
+  const rescue = spawnSync(process.execPath, [`${repo}/rescue/rescue.mjs`, 'restore', selector, '--yes', '--root', t.root], { encoding: 'utf8', env: { ...process.env, DSH_HOME: t.dsh } });
+  assert.notEqual(rescue.status, 0);
+  assert.match(rescue.stderr + rescue.stdout, /移到 DSH_HOME 外/);
+  assert.equal(await exists(b.path), true);
+  assert.equal(await fs.readFile(`${t.dsh}/.credentials.yaml`, 'utf8'), 'version: 1\nkey: synthetic-secret\n');
+  assert.equal((await fs.readdir(t.home)).some((n) => n.includes('.pre-restore-')), false);
+});
 
 await test('untrusted plugin metadata is rejected before preview/apply writes', async () => {
   const t = await setup();

@@ -13,6 +13,8 @@ dsh 宿主频繁发布 rc 列车（如 `0.1.0-rc.x` → `0.1.1-rc.x`），本插
 
 e2e 脚本的断言清单见 `scripts/e2e-host.mjs` 头注释；其中 **HTML 预加载官方 client 包**这条专门防"客户端列车陷阱"（见下）。
 
+真实宿主测试默认使用 `npm root -g` 下的 `@deepseek-ai/dsh`，本地 npm/pnpm 安装可用 `DSH_E2E_HOST_ROOT=/path/to/node_modules/@deepseek-ai/dsh node scripts/e2e-host.mjs` 指定。CLI 与严格会话解码器均从该安装解析，不依赖仓库内 `.e2e-host` 缓存。`Host compat` 同时在 PR 和每日巡检运行，自动更新兼容性 issue 仅限每日巡检。
+
 ## 版本矩阵
 
 | dsh-backup | 宿主列车 | 状态 | 备注 |
