@@ -93,8 +93,6 @@ function run(argv, cwd) {
 const parentTar = (p) => (p.endsWith('/') ? p : `${p}/`);
 
 async function sha256File(absPath) {
-  const info = await fs.stat(absPath);
-  if (info.size > HASH_MAX_BYTES) throw new Error(`文件 ${Math.floor(info.size / 1048576)}MB 超过哈希上限`);
   return new Promise((resolve, reject) => {
     const h = createHash('sha256');
     createReadStream(absPath).on('data', (d) => h.update(d)).on('error', reject).on('end', () => resolve(h.digest('hex')));
@@ -755,12 +753,30 @@ function isPidAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    return err && err.code === 'EPERM';
+    return err?.code !== 'ESRCH';
   }
 }
 
 /** 回收残留死锁（owner 证明已死才回收）。 */
 async function recoverStaleLock(root) {
+  // Use the host's same exclusive transaction guard: never remove a lock while
+  // a live host is publishing a new owner or heartbeat.
+  const guard = `${root}/${LOCK_FILE}.guard`;
+  await fs.mkdir(root, { recursive: true });
+  try { await fs.mkdir(guard, { mode: 0o700 }); }
+  catch (err) {
+    if (err.code === 'EEXIST') throw new Error(`锁元数据正在更新（${guard}），请稍后重试`);
+    throw err;
+  }
+  try {
+    await fs.writeFile(`${guard}/owner.json`, JSON.stringify({ pid: process.pid }), { mode: 0o600 });
+    return await recoverStaleLockInner(root);
+  } finally {
+    await fs.rm(guard, { recursive: true, force: true });
+  }
+}
+
+async function recoverStaleLockInner(root) {
   const lockPath = `${root}/${LOCK_FILE}`;
   let lock;
   try {

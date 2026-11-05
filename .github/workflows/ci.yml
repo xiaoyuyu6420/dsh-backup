@@ -58,3 +58,6 @@ jobs:
 
       - name: Client smoke suite
         run: node scripts/smoke-client.mjs
+
+      - name: Security and recovery regression suite
+        run: node scripts/regression-review.mjs

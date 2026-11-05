@@ -40,6 +40,9 @@ jobs:
       - name: Rebuild client bundle
         run: node scripts/build-client.mjs
 
+      - name: Security and recovery regression suite
+        run: node scripts/regression-review.mjs
+
       - name: Publish to npm
         run: npm publish --access public
         env:

@@ -170,7 +170,7 @@ const importPreviewSchema = z.object({
   totalBytes: z.number().optional(),
   conflicts: z.array(z.object({ name: z.string(), rel: z.string().optional(), section: z.string().optional(), exists: z.boolean().optional() })).optional(),
   remap: z.array(z.unknown()).optional(),
-  compatibility: z.object({ score: z.string().optional(), reasons: z.array(z.string()).optional() }).optional(),
+  compatibility: z.object({ score: z.number().min(0).max(100).optional(), reasons: z.array(z.string()).optional() }).optional(),
 });
 
 const importApplySchema = z.object({

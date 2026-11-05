@@ -375,7 +375,7 @@ function makeZstdSessionLog(id) {
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
 const REPO = path.resolve(HERE, '..');
 
-async function main() {
+async function installSmokeStubs() {
   // 提供 @deepseek-ai/dsh-tools 与 dsh-typert-protocol 桩（插件的运行时导入）。
   const stubRoot = path.join(REPO, 'node_modules', '@deepseek-ai');
   for (const pkg of ['dsh-tools', 'dsh-typert-protocol']) {
@@ -386,6 +386,10 @@ async function main() {
     await fs.copyFile(path.join(fixture, 'index.js'), path.join(stubDir, 'index.js'));
   }
 
+}
+
+async function main() {
+  await installSmokeStubs();
   const plugin = (await import(new URL('../lib/index.js', import.meta.url).href)).apply;
 
   const { dir, home, root, dsh } = await mkTmpHome();
@@ -3172,7 +3176,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+export { installSmokeStubs, makeCtx, mkTmpHome, makeTarGz, makeZstdSessionLog, tarList, rmTemp };
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.join(HERE, 'smoke.mjs')) main().catch((err) => {
   console.error(err);
   process.exitCode = 1;
 });
