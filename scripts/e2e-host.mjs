@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * 真实宿主 e2e：隔离 DSH_HOME + 本地插件 link + boot + HTTP 断言。
+ * 真实宿主 e2e：隔离 DSH_HOME + 插件打包安装 + boot + HTTP 断言。
  *
  * 用法：node scripts/e2e-host.mjs
- * 前提：PATH 里有 `dsh` CLI（CI 里先 `npm i -g @deepseek-ai/dsh@latest`）。
+ * 前提：npm 全局安装 DSH，或 DSH_E2E_HOST_ROOT 指向本地 DSH 包目录。
  *
  * 覆盖（对应 docs/compatibility.md 验收判据第 2/3 条）：
  *   1. cordis 全有或全无：boot 成功 + webserver HTTP 200 = 插件 peer/API 兼容
@@ -22,11 +22,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { zstdCompressSync, zstdDecompressSync } from 'node:zlib';
+import { hostInstallation } from './host-installation.mjs';
 
 const repoRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.E2E_PORT || 13131);
 const BASE = `http://127.0.0.1:${PORT}`;
 const BOOT_TIMEOUT_MS = 90_000;
+let host;
 // 0.1.2-rc.1 起 web 根路径与 API 强制认证：GET /?token=xxx 会 303 并下发
 // HttpOnly cookie（dsh-auth-*），之后的页面与 API 请求都凭 cookie（query token
 // 对 /api 不生效）。waitBoot 负责解析 token 并换 cookie，req() 统一带上。
@@ -42,14 +44,8 @@ const req = (url, opts = {}) => fetch(url, { ...opts, headers: { ...(opts.header
 let hostModulesCache;
 async function hostFormatModules() {
   if (hostModulesCache !== undefined) return hostModulesCache;
-  const pnpm = path.join(repoRoot, '.e2e-host', 'node_modules', '.pnpm');
-  const entry = (prefix, tail) => {
-    const dir = fs.readdirSync(pnpm).find((d) => d.startsWith(prefix));
-    if (!dir) throw new Error(`e2e 缺少宿主包 ${prefix}`);
-    return path.join(pnpm, dir, 'node_modules', ...tail);
-  };
-  const catalog = await import(pathToFileURL(entry('@deepseek-ai+dsh-session-format-catalog@', ['@deepseek-ai', 'dsh-session-format-catalog', 'lib', 'index.js'])).href);
-  const session = await import(pathToFileURL(entry('@deepseek-ai+dsh-session@', ['@deepseek-ai', 'dsh-session', 'lib', 'index.js'])).href);
+  const catalog = await import(pathToFileURL(host.catalog).href);
+  const session = await import(pathToFileURL(host.session).href);
   hostModulesCache = { catalog, session };
   return hostModulesCache;
 }
@@ -99,7 +95,7 @@ function check(name, ok, detail = '') {
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 180_000, ...opts });
   if (r.status !== 0) {
-    throw new Error(`${cmd} ${args.join(' ')} 失败 (exit ${r.status}):\n${r.stderr || r.stdout}`);
+    throw new Error(`${cmd} ${args.join(' ')} 失败 (exit ${r.status}):\n${r.error?.message || ''}\n${r.stdout || ''}\n${r.stderr || ''}`);
   }
   return r.stdout;
 }
@@ -113,7 +109,7 @@ let bootLogStream = null;
 function startBoot() {
   bootLogPath = path.join(home, 'boot.log');
   bootLogStream = fs.createWriteStream(bootLogPath);
-  bootProc = spawn('dsh', ['web', '--no-open'], {
+  bootProc = spawn(process.execPath, [host.cli, 'web', '--no-open'], {
     cwd: home,
     // HOME 一并隔离：默认备份目的地（~/Desktop/DSH Backups）与 auto.json 都
     // 派生自 HOME——不隔离会把启动钩子的状态写进开发者真实备份目录
@@ -190,20 +186,23 @@ async function waitBoot() {
 }
 
 async function main() {
+  const hostRoot = process.env.DSH_E2E_HOST_ROOT || path.join(run('npm', ['root', '-g']).trim(), '@deepseek-ai', 'dsh');
+  host = hostInstallation(hostRoot);
+  console.log(`DSH installation: ${host.version} (${host.cli})`);
   console.log(`[e2e-host] repo=${repoRoot} port=${PORT}`);
 
   // ---------- 准备：隔离 DSH_HOME + tarball 安装 ----------
   // 不用 `dsh plugin add <repo>`（link 方式）：link 引导的 profile 里 panel RPC 报
   // `active Service "backupPanel" is unavailable`（宿主 link 路径的差异，npm/tarball 正常）。
   // tarball 安装 = 真实用户路径，且顺带验证发布物内容。
-  if (spawnSync('dsh', ['--version']).status !== 0) throw new Error('PATH 里找不到 dsh CLI');
+  run(process.execPath, [host.cli, '--version']);
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-'));
   packDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-pack-'));
   console.log(`[e2e-host] 打包 tarball...`);
   run('pnpm', ['pack', '--pack-destination', packDir], { cwd: repoRoot });
   const tarball = fs.readdirSync(packDir).find((f) => f.endsWith('.tgz'));
   if (!tarball) throw new Error('pnpm pack 未产出 tarball');
-  run('dsh', ['plugin', '--profile', 'web', 'add', path.join(packDir, tarball)], { env: { ...process.env, DSH_HOME: home }, cwd: path.dirname(home) });
+  run(process.execPath, [host.cli, 'plugin', '--profile', 'web', 'add', path.join(packDir, tarball)], { env: { ...process.env, DSH_HOME: home }, cwd: path.dirname(home) });
 
   const patchFile = path.join(home, 'profiles', 'web', 'cordis.patch.yml');
   fs.writeFileSync(patchFile, [
@@ -352,6 +351,11 @@ async function main() {
     }
     const bk = await rpc('backup');
     check('RPC backup 成功', bk?.ok === true, JSON.stringify(bk).slice(0, 160));
+    if (bk?.ok) {
+      const entries = run('tar', ['-tzf', bk.path]).trim().split('\n');
+      const backupPrefix = `${path.basename(home)}/bkdest`;
+      check('内部备份目录及其 vault 不进入归档', entries.every((entry) => entry !== backupPrefix && !entry.startsWith(`${backupPrefix}/`)));
+    }
     // 0.14.0：备份目录根要落一份人话版使用说明——用户第一次打开文件夹时的入口
     check('备份目录写入 使用说明.txt（0.14.0）', (() => {
       try {
@@ -473,7 +477,7 @@ async function main() {
     // 1) 启动即记录"正在运行的宿主版本"，且与 CLI 报告一致（argv 解析实证，
     //    覆盖全局/npm/npx 缓存安装形态）。auto.json 跟随生效备份目录：首次
     //    启动在默认目的地（HOME 已隔离），设置 destination 后迁移到 bkdest。
-    const verOut = spawnSync('dsh', ['--version'], { encoding: 'utf8' });
+    const verOut = spawnSync(process.execPath, [host.cli, '--version'], { encoding: 'utf8' });
     const cliVersion = (verOut.stdout || '').trim();
     const defaultAuto = () => path.join(home, 'Desktop', 'DSH Backups', 'auto.json');
     const bkdestAuto = () => path.join(home, 'bkdest', 'auto.json');
@@ -629,6 +633,7 @@ async function main() {
       // 1) 加密备份：口令只经 RPC；list 标加密、verify 免口令、restore 错口令拒绝、对口令 dry-run 通过
       const bkEnc = await rpc('backup', { password: 'e2e-pass-123' });
       check('加密备份成功（encrypted=true）', bkEnc?.ok === true && bkEnc?.encrypted === true, JSON.stringify(bkEnc).slice(0, 160));
+      if (!bkEnc?.ok || !bkEnc.path) throw new Error(`加密备份失败，停止依赖此归档的断言: ${JSON.stringify(bkEnc)}`);
       const encName = path.basename(String(bkEnc?.path ?? ''));
       check('加密边车落盘', fs.existsSync(path.join(bkdest, `${encName}.encrypted.json`)));
       const stEnc = await rpc('status');

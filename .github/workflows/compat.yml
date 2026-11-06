@@ -5,6 +5,7 @@ name: Host compat
 # issue 列表即兼容性健康日志；上游由每日 ZCode 巡检盯本 workflow 是否按时运行。
 
 on:
+  pull_request:
   schedule:
     - cron: '0 22 * * *' # UTC 22:00 = 北京时间 06:00
   workflow_dispatch:
@@ -14,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: host-compat
+  group: host-compat-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -34,9 +35,8 @@ jobs:
       - name: Install latest dsh host
         run: npm i -g @deepseek-ai/dsh@latest
 
-      # e2e 以 link 方式挂载本仓库，插件的 peer imports 从 repo 的 node_modules 解析——
-      # 必须先装依赖（含 auto-install 的 peers），否则 boot 报 Cannot find package（见 run 32775395308）。
-      - name: Install repo dependencies (peers resolve from here)
+      # Pack this checkout, then install it into an isolated real host profile.
+      - name: Install repo dependencies
         env:
           npm_config_minimum_release_age: 0
           npm_config_minimumReleaseAge: 0
@@ -51,7 +51,7 @@ jobs:
         run: node scripts/e2e-host.mjs
 
       - name: Open or update issue on failure
-        if: failure()
+        if: failure() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -76,7 +76,7 @@ jobs:
           fi
 
       - name: Close issues on recovery
-        if: success()
+        if: success() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

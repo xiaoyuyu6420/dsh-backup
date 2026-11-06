@@ -161,7 +161,7 @@ async function main() {
     'backupPanel/checkUpdate': { ok: true, current: '0.12.2', latest: '0.13.0', update: true, error: null, summary: '发现新版本：0.12.2 → 0.13.0' },
     'backupPanel/update': { ok: true, updated: true, current: '0.13.0', latest: '0.13.0', summary: '已更新到 0.13.0。\n请重启 dsh web 使新版本生效。' },
     'backupPanel/exportConfig': { ok: true, summary: '已导出', path: '/x/dsh-config-1.zip', name: 'dsh-config-1.zip', size: 1234, encrypted: false, redactedFiles: [] },
-    'backupPanel/importPreview': { ok: true, summary: '预览完成', encrypted: false, sections: [{ key: 'settings', label: '设置', files: 3, bytes: 100, conflicts: [{ name: 'settings.yaml', rel: 'settings.yaml', exists: true }] }], totalFiles: 3, totalBytes: 100, conflicts: [{ name: 'settings.yaml', rel: 'settings.yaml', section: 'settings', exists: true }], remap: [], compatibility: { score: 'Good', reasons: [] } },
+    'backupPanel/importPreview': { ok: true, summary: '预览完成', encrypted: false, sections: [{ key: 'settings', label: '设置', files: 3, bytes: 100, conflicts: [{ name: 'settings.yaml', rel: 'settings.yaml', exists: true }] }], totalFiles: 3, totalBytes: 100, conflicts: [{ name: 'settings.yaml', rel: 'settings.yaml', section: 'settings', exists: true }], remap: [], compatibility: { score: 100, reasons: [] } },
     'backupPanel/importApply': { ok: true, summary: '已导入', encrypted: false, applied: 3, skipped: 0, overwrote: 0, snapshot: null, remapped: 0 },
     'backupPanel/syncStatus': { ok: true, summary: '已同步', channels: { github: { repo: 'u/backups' }, webdav: {}, s3: {}, gist: {} } },
     'backupPanel/syncNow': { ok: true, summary: '已推送', pushed: true, count: 1, at: '2026-10-18T00:00:00.000Z', tooBig: [] },
