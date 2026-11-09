@@ -154,6 +154,8 @@ dsh plugin --profile web add github:xiaoyuyu6420/dsh-backup
 <details>
 <summary>最近的版本</summary>
 
+- **0.14.3** —— 发布 #139 的安全与可靠性修复：限制归档与插件导入路径，修复失败回滚、凭据留档权限和操作锁；损坏会话不再触发删除健康备份；修复本地插件迁移、预览结果校验和救援大文件校验。备份目录位于 `DSH_HOME` 内时，tar/ZIP 会排除整个备份目录及 vault，避免重复打包和文件变化错误；整包恢复前需先将整个备份目录移到 `DSH_HOME` 外。新增 26 组回归，真实 DSH `0.2.2-rc.1` e2e 71/71。详情：[发布说明](docs/promo/release-0.14.3.md)。
+
 - **0.14.2** —— 复核修复：加密/解密改**分块流式**并「写临时文件 → 原子替换」（大归档不再整包入内存，崩溃不留半截密文）；补 `setGithubToken` 缺失的客户端 descriptor + 「面板方法必有 descriptor」反向断言；`redactSyncChannel` 补花括号（修掉 s3/gist 通道假的 `passwordSet:false`）；文案补 Codex、导入预览不再承诺界面逐项覆盖、多通道同步写清为单向推送、About 加反馈入口、`rescue --fix --map` 需 `--yes`；验收 smoke 596 / settings 47 / client 62 / 真机 e2e 70。
 
 - **0.14.1** —— 补发:npm 上的 0.14.0 先于 Codex 支持发布,本版把「Codex 聊天记录导入」补齐到 npm 版本(Claude Code / Codex 双来源:扫描 → 预览 → 导入为新会话,函数调用按 call_id 配对成工具调用/结果,原数据零改动),并同步验收数字(smoke 587 / settings 47 / client 60 / 真机 e2e 70)。

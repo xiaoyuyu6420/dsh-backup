@@ -97,6 +97,8 @@
 
 ## 7. 严格验收清单（G7，交付 gate）
 
+0.14.3 发布复核（2026-11-09）：发布 #139 已合并的修复；Linux 上 smoke 596、settings 47、client 62、review regressions 26 全部通过，DSH `0.2.2-rc.1` 的真实宿主 e2e 71/71。版本号、中英文 README、兼容矩阵、重建产物和 `npm pack` 内容已核对；本轮未复测 Windows/macOS，下面的人工抽检保持未勾选。
+
 - [x] `node scripts/build-client.mjs` 通过（产物与 src 同步的 `git diff --exit-code lib/client.js` 在发布前复核）
 - [x] `node scripts/smoke.mjs`（596/596；Windows 583，36c/45b/47a POSIX 专属）
 - [x] `node scripts/smoke-settings.mjs`（47/47）
