@@ -27,10 +27,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "BACKUP_PROBE_DEPS=$deps" >> $env:GITHUB_ENV
           "BACKUP_PROBE_REPORT=$(Join-Path $env:RUNNER_TEMP 'backup-138-report.json')" >> $env:GITHUB_ENV
-      - name: Compare 3308 MiB and 54000 files with the real Windows host runner
-        run: node scripts/windows-backup-probe.mjs
       - name: Windows recovery regressions
         run: node --test scripts/backup-tar.test.mjs
+      - name: Check tar interoperability on a small fixture first
+        run: node scripts/windows-backup-probe.mjs --quick
+      - name: Compare 3308 MiB and 54000 files with the real Windows host runner
+        run: node scripts/windows-backup-probe.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

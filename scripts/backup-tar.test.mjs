@@ -49,7 +49,7 @@ async function fixture(t, outcomes, overrides = {}) {
       };
     },
   };
-  const argv = [GNU, '--exclude=*node_modules*', '--exclude=.system', '--exclude=.dsh/.env', '--exclude=.dsh/back[[]ups[]]*', '-czf', 'backup.tar.gz', '-C', 'C:/用户 home/', '.dsh'];
+  const argv = [GNU, '--exclude=*node_modules*', '--exclude=.system', '--exclude=.dsh/.env', '--exclude=.dsh/back[[]ups[]]*', '-czf', 'backup.tar.gz', '-C', 'C:/user home/', '.dsh'];
   const options = { subprocess, argv, cwd, archive, platform: 'win32', systemRoot: 'C:\\Windows', ...overrides };
   return { options, calls, resolved, archive, subprocess };
 }
@@ -157,6 +157,15 @@ test('retry failure preserves both errors and never tries a third time', async t
   });
   assert.equal(f.calls.length, 2);
 });
+
+for (const value of ['C:/用户 home/', '--exclude=.dsh/密钥.yaml', '.dsh/技能']) {
+  test(`native fallback refuses lossy Unicode arguments: ${value}`, async t => {
+    const f = await fixture(t, [{ exitCode: AV }]);
+    f.options.argv.push(value);
+    await assert.rejects(createBackupArchive(f.options), /无法安全处理含非 ASCII/);
+    assert.equal(f.calls.length, 1);
+  });
+}
 
 test('failure to clean the partial archive prevents a second writer', async t => {
   const f = await fixture(t, [{ exitCode: AV }]);

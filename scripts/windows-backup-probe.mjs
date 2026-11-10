@@ -23,14 +23,17 @@ const gnuTar = path.join(msys, 'tar.exe');
 const bsdTar = path.join(process.env.SystemRoot, 'System32', 'tar.exe');
 process.env.PATH = `${msys}${path.delimiter}${process.env.PATH}`;
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'backup-138-'));
-const home = path.join(root, '用户 home');
+// Match the report's ASCII home path. Native Windows bsdtar cannot safely
+// receive Unicode argv; the recovery unit tests require that case to fail closed.
+const home = path.join(root, 'user home');
 const source = path.join(home, '.dsh');
 const destination = path.join(root, 'DSH Backups');
 await fs.mkdir(source, { recursive: true });
 await fs.mkdir(destination, { recursive: true });
 const ctx = new Context();
 const runtime = new LocalSubprocessRuntime(ctx);
-const report = { platform: process.platform, os: os.release(), node: process.version, mode: runtime.selectContainmentMode('ordinary'), results: [] };
+const quick = process.argv.includes('--quick');
+const report = { platform: process.platform, os: os.release(), node: process.version, quick, mode: runtime.selectContainmentMode('ordinary'), results: [] };
 assert.equal(report.mode, 'windows-job', 'The host must exercise its native Job runner, not silently fall back');
 const output = process.env.BACKUP_PROBE_REPORT || `${root}-report.json`;
 async function saveReport() { await fs.writeFile(output, JSON.stringify(report, null, 2)); }
@@ -90,19 +93,23 @@ async function run(label, executable, transport, stdioMode = 'collect') {
     }
     result.bytes = await fs.stat(archive).then(s => s.size, () => 0);
     if (result.outcome.exitCode === 0) {
-      assert.ok(result.bytes > 2 * 1024 ** 3, 'Archive must exceed the reported 244 MB failure and 2 GiB boundaries');
-      const listed = spawnSync(bsdTar, ['-tzf', archive], { encoding: 'utf8', maxBuffer: 32 * 1024 ** 2, timeout: 180000 });
+      assert.ok(result.bytes > (quick ? 1024 ** 2 : 2 * 1024 ** 3), 'Archive must exceed the fixture size boundary');
+      // Native bsdtar's console output can replace Unicode with '?'. GNU tar
+      // supplies a UTF-8 listing; native tar is still used for actual extraction.
+      const listed = spawnSync(gnuTar, ['--quoting-style=literal', '-tzf', 'probe.tar.gz'], { cwd: destination, encoding: 'utf8', maxBuffer: 32 * 1024 ** 2, timeout: 180000 });
       assert.equal(listed.status, 0, listed.stderr);
       const names = listed.stdout.trim().split(/\r?\n/);
       result.entries = names.length;
-      assert.ok(result.entries >= 54000);
-      assert.equal(names.some(n => /node_modules|\.env$|\.credentials\.yaml$|back\[ups\]/.test(n)), false, 'Preserve backup exclusions with either tar');
-      assert.ok(names.includes('.dsh/中文 文件.txt'), 'Preserve Unicode and spaces');
+      assert.ok(result.entries >= (quick ? 12 : 54000));
+      result.unexpectedExcludedNames = names.filter(n => /node_modules|\.env$|\.credentials\.yaml$|back\[ups\]/.test(n));
+      assert.deepEqual(result.unexpectedExcludedNames, [], 'Preserve backup exclusions with either tar');
+      assert.ok(names.includes('.dsh/unicode/中文 文件.txt'), 'Preserve Unicode and spaces');
       const restored = path.join(root, 'restore');
       await fs.mkdir(restored, { recursive: true });
-      const extracted = spawnSync(bsdTar, ['-xzf', archive, '-C', restored, '.dsh/sessions/large.bin'], { encoding: 'utf8', timeout: 180000 });
+      const extracted = spawnSync(bsdTar, ['-xzf', archive, '-C', restored, '.dsh/sessions/large.bin', '.dsh/unicode'], { encoding: 'utf8', timeout: 180000 });
       assert.equal(extracted.status, 0, extracted.stderr);
       assert.equal(await sha256(path.join(restored, '.dsh/sessions/large.bin')), await sha256(path.join(source, 'sessions/large.bin')));
+      assert.equal(await fs.readFile(path.join(restored, '.dsh/unicode/中文 文件.txt'), 'utf8'), 'Unicode fixture');
       result.restoredHashVerified = true;
       await fs.rm(restored, { recursive: true, force: true });
     }
@@ -125,21 +132,22 @@ try {
     const dir = path.join(source, name);
     await fs.mkdir(dir, { recursive: true });
     const file = await fs.open(path.join(dir, 'large.bin'), 'w');
-    try { for (let i = 0; i < mib; i++) await file.writeFile(block); } finally { await file.close(); }
+    try { for (let i = 0; i < (quick ? 1 : mib); i++) await file.writeFile(block); } finally { await file.close(); }
   }
-  for (let dir = 0; dir < 54; dir++) {
+  for (let dir = 0; dir < (quick ? 3 : 54); dir++) {
     const target = path.join(source, 'small', String(dir));
     await fs.mkdir(target, { recursive: true });
-    for (let file = 0; file < 1000; file++) await fs.writeFile(path.join(target, `${file}.txt`), 'synthetic test data\n');
+    for (let file = 0; file < (quick ? 4 : 1000); file++) await fs.writeFile(path.join(target, `${file}.txt`), 'synthetic test data\n');
   }
-  await fs.writeFile(path.join(source, '中文 文件.txt'), 'Unicode fixture');
+  await fs.mkdir(path.join(source, 'unicode'));
+  await fs.writeFile(path.join(source, 'unicode/中文 文件.txt'), 'Unicode fixture');
   await fs.writeFile(path.join(source, '.env'), 'synthetic secret');
   await fs.writeFile(path.join(source, '.credentials.yaml'), 'synthetic secret');
   for (const dir of ['node_modules', 'nested/node_modules', 'back[ups]']) {
     await fs.mkdir(path.join(source, dir), { recursive: true });
     await fs.writeFile(path.join(source, dir, 'excluded.txt'), 'excluded fixture');
   }
-  report.sourceMiB = 3308;
+  report.sourceMiB = quick ? 6 : 3308;
   console.log(JSON.stringify({ fixtureReady: true, ...report }));
   await run('GNU tar / host collect (baseline)', gnuTar, 'host');
   await run('GNU tar / host pipe', gnuTar, 'host', 'pipe');
