@@ -7,7 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createBackupArchive } from '../lib/backup-tar.js';
 import { tarLiteralPattern } from '../lib/paths.js';
 
@@ -20,12 +20,10 @@ const { LocalSubprocessRuntime } = await import(pathToFileURL(require.resolve('@
 const { scrubbedParentEnv } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-subprocess')).href);
 const msys = path.join(dependencyRoot, 'node_modules', '@dsh-ops', 'bash-win32-x64', 'usr', 'bin');
 const gnuTar = path.join(msys, 'tar.exe');
-const bsdTar = path.join(process.env.SystemRoot, 'System32', 'tar.exe');
+const runner = fileURLToPath(new URL('../lib/backup-tar-runner.js', import.meta.url));
 process.env.PATH = `${msys}${path.delimiter}${process.env.PATH}`;
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'backup-138-'));
-// Match the report's ASCII home path. Native Windows bsdtar cannot safely
-// receive Unicode argv; the recovery unit tests require that case to fail closed.
-const home = path.join(root, 'user home');
+const home = path.join(root, '用户 home');
 const source = path.join(home, '.dsh');
 const destination = path.join(root, 'DSH Backups');
 await fs.mkdir(source, { recursive: true });
@@ -69,11 +67,11 @@ async function run(label, executable, transport, stdioMode = 'collect') {
       };
       result.recovery = await createBackupArchive({ subprocess, argv, cwd: destination, archive });
       assert.equal(result.recovery.retried, true);
-      assert.equal(result.recovery.executable.toLowerCase(), bsdTar.toLowerCase());
+      assert.equal(result.recovery.executable, executable);
       result.outcome = { exitCode: 0, signal: null };
-    } else if (transport === 'host') {
+    } else if (transport === 'host' || transport === 'bridge') {
       const collected = { maxBytes: 8192, spill: { maxBytes: 1 << 20 } };
-      const child = runtime.spawn({ argv, cwd: destination, graceMs: 5000, stdio: { stdin: 'ignore', stdout: stdioMode === 'pipe' ? 'pipe' : collected, stderr: stdioMode === 'pipe' ? 'pipe' : collected } });
+      const child = runtime.spawn({ argv: transport === 'bridge' ? [process.execPath, runner, ...argv] : argv, cwd: destination, graceMs: 5000, stdio: { stdin: 'ignore', stdout: stdioMode === 'pipe' ? 'pipe' : collected, stderr: stdioMode === 'pipe' ? 'pipe' : collected } });
       let out = Buffer.alloc(0); let err = Buffer.alloc(0);
       child.stdout?.on('data', c => { out = tailBuffer(out, c); });
       child.stderr?.on('data', c => { err = tailBuffer(err, c); });
@@ -94,8 +92,7 @@ async function run(label, executable, transport, stdioMode = 'collect') {
     result.bytes = await fs.stat(archive).then(s => s.size, () => 0);
     if (result.outcome.exitCode === 0) {
       assert.ok(result.bytes > (quick ? 1024 ** 2 : 2 * 1024 ** 3), 'Archive must exceed the fixture size boundary');
-      // Native bsdtar's console output can replace Unicode with '?'. GNU tar
-      // supplies a UTF-8 listing; native tar is still used for actual extraction.
+      // Quote literally for an exact UTF-8 filename comparison in any locale.
       const listed = spawnSync(gnuTar, ['--quoting-style=literal', '-tzf', 'probe.tar.gz'], { cwd: destination, encoding: 'utf8', maxBuffer: 32 * 1024 ** 2, timeout: 180000 });
       assert.equal(listed.status, 0, listed.stderr);
       const names = listed.stdout.trim().split(/\r?\n/);
@@ -106,7 +103,7 @@ async function run(label, executable, transport, stdioMode = 'collect') {
       assert.ok(names.includes('.dsh/unicode/中文 文件.txt'), 'Preserve Unicode and spaces');
       const restored = path.join(root, 'restore');
       await fs.mkdir(restored, { recursive: true });
-      const extracted = spawnSync(bsdTar, ['-xzf', archive, '-C', restored, '.dsh/sessions/large.bin', '.dsh/unicode'], { encoding: 'utf8', timeout: 180000 });
+      const extracted = spawnSync(gnuTar, ['-xzf', 'probe.tar.gz', '-C', restored.replaceAll('\\', '/'), '.dsh/sessions/large.bin', '.dsh/unicode'], { cwd: destination, encoding: 'utf8', timeout: 180000 });
       assert.equal(extracted.status, 0, extracted.stderr);
       assert.equal(await sha256(path.join(restored, '.dsh/sessions/large.bin')), await sha256(path.join(source, 'sessions/large.bin')));
       assert.equal(await fs.readFile(path.join(restored, '.dsh/unicode/中文 文件.txt'), 'utf8'), 'Unicode fixture');
@@ -125,7 +122,34 @@ async function run(label, executable, transport, stdioMode = 'collect') {
   }
 }
 
+async function checkContainment() {
+  const marker = path.join(root, 'grandchild.json');
+  const grandchild = `const fs=require('node:fs');setInterval(()=>fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,time:Date.now()})),50)`;
+  const child = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(grandchild)}],{detached:false,stdio:'ignore'});setInterval(()=>{},1000)`;
+  const controller = new AbortController();
+  const proc = runtime.spawn({ argv: [process.execPath, runner, process.execPath, '-e', child], cwd: root, signal: controller.signal, graceMs: 5000, stdio: { stdin: 'ignore', stdout: { maxBytes: 8192 }, stderr: { maxBytes: 8192 } } });
+  let seen;
+  try {
+    for (let i = 0; i < 50 && !seen; i++) {
+      seen = await fs.readFile(marker, 'utf8').then(s => { try { return JSON.parse(s); } catch { return null; } }, () => null);
+      if (!seen) await new Promise(r => setTimeout(r, 100));
+    }
+    assert.ok(seen, 'The wrapped grandchild must start');
+  } finally {
+    controller.abort();
+    await proc.done;
+    await proc.waitForExit();
+  }
+  const stopped = await fs.readFile(marker, 'utf8');
+  await new Promise(r => setTimeout(r, 200));
+  assert.equal(await fs.readFile(marker, 'utf8'), stopped, 'Cancellation must stop all descendants');
+  assert.throws(() => process.kill(seen.pid, 0), 'The grandchild must have exited the Windows Job');
+  report.cancelledGrandchild = true;
+  await saveReport();
+}
+
 try {
+  await checkContainment();
   // Random blocks remain incompressible even when reused beyond gzip's window.
   const block = randomBytes(1024 ** 2);
   for (const [name, mib] of [['attachments', 999], ['dsh-ops', 822], ['change-ledger', 681], ['browser', 358], ['electron', 348], ['sessions', 100]]) {
@@ -152,12 +176,13 @@ try {
   await run('GNU tar / host collect (baseline)', gnuTar, 'host');
   await run('GNU tar / host pipe', gnuTar, 'host', 'pipe');
   await run('GNU tar / Node spawn', gnuTar, 'node');
-  await run('System32 bsdtar / host collect', bsdTar, 'host');
-  await run('Plugin recovery / injected access violation / native host tar', gnuTar, 'injected-recovery');
+  await run('GNU tar / host-managed Node launcher', gnuTar, 'bridge');
+  await run('Plugin recovery / injected access violation / host-managed Node launcher', gnuTar, 'injected-recovery');
 } finally {
   await runtime.disposeManagedProcesses();
   await saveReport();
   await fs.rm(root, { recursive: true, force: true });
 }
 assert.ok(report.results.some(r => r.outcome?.exitCode === 0 && !r.error), 'No comparison produced a valid large archive');
+assert.ok(report.results.some(r => r.transport === 'bridge' && r.outcome?.exitCode === 0 && !r.error), 'Host-managed Node launcher must produce a valid archive');
 assert.ok(report.results.some(r => r.transport === 'injected-recovery' && r.outcome?.exitCode === 0 && !r.error), 'Plugin recovery must produce a valid large archive');

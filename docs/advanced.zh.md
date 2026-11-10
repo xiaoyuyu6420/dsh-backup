@@ -168,8 +168,8 @@ v0.7.0 起每份备份附带 `.meta.json`（机器元数据）与 `.redacted.jso
 
 - **装错了包** —— 正确的包名是 `@xiaoyuyu6420/dsh-backup`（带前缀）。不带前缀的 `dsh-backup` 是无关的第三方包。检查 profile 的插件列表，用正确名字重装。
 - **插件加载失败，报 `client api: method "backupPanel/remove" conflicts with its namespace service`** —— 你装的是 v0.5.0 旧版（详见 [#2](https://github.com/xiaoyuyu6420/dsh-backup/issues/2)、[#5](https://github.com/xiaoyuyu6420/dsh-backup/issues/5)）。v0.5.1 已修复：执行 `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup@latest` 升级，重启 `dsh web` 即可。
-- **Windows 上用哪个 `tar`？** 正常情况下使用宿主从 PATH 找到的 tar。针对 [#138](https://github.com/xiaoyuyu6420/dsh-backup/issues/138) 报告的 MSYS tar 大备份访问冲突，备份进程以 `3221225477 / 0xC0000005` 退出时，会先等待进程树结束、删除未完成归档，再通过同一宿主服务用 `%SystemRoot%\System32\tar.exe` 重试一次。其他错误或用户取消不会触发重试。若仍失败，错误包含退出码、已写入字节数、程序路径和 stderr；这条恢复路径不代表底层 MSYS / 宿主崩溃根因已经确认。
-- **系统 tar 重试提示非 ASCII 参数不安全？** Windows 自带 bsdtar 的命令行参数存在有损字符转换问题（[libarchive #2092](https://github.com/libarchive/libarchive/issues/2092)）。为避免排除规则失效、将敏感文件打包，传给系统 tar 的路径或排除参数含非 ASCII 字符时会明确拒绝重试。这不限制正常 GNU tar 备份，也不限制 ASCII 目录下归档内部的 Unicode 文件名。
+- **Windows 大备份报 `0xC0000005`？** 针对 [#138](https://github.com/xiaoyuyu6420/dsh-backup/issues/138)，只在 Windows 归档进程出现这个访问冲突退出码时重试一次：结束原进程树、删除半成品，再由宿主管理的 Node 启动器运行同一个 tar，参数、排除规则和环境保持原样。启动器及其子进程仍受宿主 Windows Job 管理，取消会终止整棵进程树。其他错误或用户取消不触发重试。失败诊断包括程序、退出码、已写入字节数和 stderr。此恢复措施不代表原报告的底层崩溃原因已经确认。
+- **为什么不直接换成系统 tar？** 实测 Windows 自带 bsdtar 对非 ASCII 命令行参数可能发生有损转换，且通过报告中的宿主启动时也出现过访问冲突。因此恢复时保留原 tar，避免改变归档格式、字符处理和排除语义。
 
 ## 开发
 
