@@ -29,6 +29,8 @@ jobs:
           "BACKUP_PROBE_REPORT=$(Join-Path $env:RUNNER_TEMP 'backup-138-report.json')" >> $env:GITHUB_ENV
       - name: Compare 3308 MiB and 54000 files with the real Windows host runner
         run: node scripts/windows-backup-probe.mjs
+      - name: Windows recovery regressions
+        run: node --test scripts/backup-tar.test.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

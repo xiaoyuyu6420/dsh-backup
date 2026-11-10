@@ -1,12 +1,15 @@
 /** #138: synthetic Windows comparison of real host subprocess and Node spawn. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createBackupArchive } from '../lib/backup-tar.js';
+import { tarLiteralPattern } from '../lib/paths.js';
 
 assert.equal(process.platform, 'win32', 'Run this probe on real Windows');
 const dependencyRoot = process.env.BACKUP_PROBE_DEPS;
@@ -29,19 +32,43 @@ const ctx = new Context();
 const runtime = new LocalSubprocessRuntime(ctx);
 const report = { platform: process.platform, os: os.release(), node: process.version, mode: runtime.selectContainmentMode('ordinary'), results: [] };
 assert.equal(report.mode, 'windows-job', 'The host must exercise its native Job runner, not silently fall back');
-const output = process.env.BACKUP_PROBE_REPORT || path.join(root, 'report.json');
+const output = process.env.BACKUP_PROBE_REPORT || `${root}-report.json`;
 async function saveReport() { await fs.writeFile(output, JSON.stringify(report, null, 2)); }
 function tailBuffer(previous, chunk) { return Buffer.concat([previous, chunk]).subarray(-8192); }
+async function sha256(file) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
 
 async function run(label, executable, transport, stdioMode = 'collect') {
   const archive = path.join(destination, 'probe.tar.gz');
-  const argv = [executable, '--exclude=*node_modules*', '--exclude=.system', '-czf', 'probe.tar.gz', '-C', home.replaceAll('\\', '/') + '/', '.dsh'];
+  const argv = [executable, '--exclude=*node_modules*', '--exclude=.system', '--exclude=.dsh/.env', '--exclude=*/.credentials.yaml', `--exclude=${tarLiteralPattern('.dsh/back[ups]')}`, '-czf', 'probe.tar.gz', '-C', home.replaceAll('\\', '/') + '/', '.dsh'];
   const started = Date.now();
-  const result = { label, transport, executable, stdioMode, version: spawnSync(executable, ['--version'], { encoding: 'utf8' }).stdout.trim() };
+  const version = spawnSync(executable, ['--version'], { encoding: 'utf8', timeout: 10000 });
+  const result = { label, transport, executable, stdioMode, version: version.stdout?.trim() || version.error?.message || version.stderr?.trim() };
   let peakBytes = 0;
   const timer = setInterval(() => { fs.stat(archive).then(s => { peakBytes = Math.max(peakBytes, s.size); }, () => {}); }, 500);
   try {
-    if (transport === 'host') {
+    if (transport === 'injected-recovery') {
+      let injected = false;
+      const subprocess = {
+        resolveExecutable: runtime.resolveExecutable.bind(runtime),
+        spawn(spec) {
+          if (!injected) {
+            injected = true;
+            // Exercise a real Windows exit status and managed range, while
+            // clearly labelling this as fault injection, not crash reproduction.
+            return runtime.spawn({ ...spec, argv: [process.execPath, '-e', "require('node:fs').writeFileSync('probe.tar.gz', 'partial');process.exit(0xC0000005)"] });
+          }
+          return runtime.spawn(spec);
+        },
+      };
+      result.recovery = await createBackupArchive({ subprocess, argv, cwd: destination, archive });
+      assert.equal(result.recovery.retried, true);
+      assert.equal(result.recovery.executable.toLowerCase(), bsdTar.toLowerCase());
+      result.outcome = { exitCode: 0, signal: null };
+    } else if (transport === 'host') {
       const collected = { maxBytes: 8192, spill: { maxBytes: 1 << 20 } };
       const child = runtime.spawn({ argv, cwd: destination, graceMs: 5000, stdio: { stdin: 'ignore', stdout: stdioMode === 'pipe' ? 'pipe' : collected, stderr: stdioMode === 'pipe' ? 'pipe' : collected } });
       let out = Buffer.alloc(0); let err = Buffer.alloc(0);
@@ -66,8 +93,18 @@ async function run(label, executable, transport, stdioMode = 'collect') {
       assert.ok(result.bytes > 2 * 1024 ** 3, 'Archive must exceed the reported 244 MB failure and 2 GiB boundaries');
       const listed = spawnSync(bsdTar, ['-tzf', archive], { encoding: 'utf8', maxBuffer: 32 * 1024 ** 2, timeout: 180000 });
       assert.equal(listed.status, 0, listed.stderr);
-      result.entries = listed.stdout.trim().split('\n').length;
+      const names = listed.stdout.trim().split(/\r?\n/);
+      result.entries = names.length;
       assert.ok(result.entries >= 54000);
+      assert.equal(names.some(n => /node_modules|\.env$|\.credentials\.yaml$|back\[ups\]/.test(n)), false, 'Preserve backup exclusions with either tar');
+      assert.ok(names.includes('.dsh/中文 文件.txt'), 'Preserve Unicode and spaces');
+      const restored = path.join(root, 'restore');
+      await fs.mkdir(restored, { recursive: true });
+      const extracted = spawnSync(bsdTar, ['-xzf', archive, '-C', restored, '.dsh/sessions/large.bin'], { encoding: 'utf8', timeout: 180000 });
+      assert.equal(extracted.status, 0, extracted.stderr);
+      assert.equal(await sha256(path.join(restored, '.dsh/sessions/large.bin')), await sha256(path.join(source, 'sessions/large.bin')));
+      result.restoredHashVerified = true;
+      await fs.rm(restored, { recursive: true, force: true });
     }
   } catch (error) { result.error = error.stack; }
   finally {
@@ -95,15 +132,24 @@ try {
     await fs.mkdir(target, { recursive: true });
     for (let file = 0; file < 1000; file++) await fs.writeFile(path.join(target, `${file}.txt`), 'synthetic test data\n');
   }
+  await fs.writeFile(path.join(source, '中文 文件.txt'), 'Unicode fixture');
+  await fs.writeFile(path.join(source, '.env'), 'synthetic secret');
+  await fs.writeFile(path.join(source, '.credentials.yaml'), 'synthetic secret');
+  for (const dir of ['node_modules', 'nested/node_modules', 'back[ups]']) {
+    await fs.mkdir(path.join(source, dir), { recursive: true });
+    await fs.writeFile(path.join(source, dir, 'excluded.txt'), 'excluded fixture');
+  }
   report.sourceMiB = 3308;
   console.log(JSON.stringify({ fixtureReady: true, ...report }));
   await run('GNU tar / host collect (baseline)', gnuTar, 'host');
   await run('GNU tar / host pipe', gnuTar, 'host', 'pipe');
   await run('GNU tar / Node spawn', gnuTar, 'node');
   await run('System32 bsdtar / host collect', bsdTar, 'host');
+  await run('Plugin recovery / injected access violation / native host tar', gnuTar, 'injected-recovery');
 } finally {
   await runtime.disposeManagedProcesses();
   await saveReport();
   await fs.rm(root, { recursive: true, force: true });
 }
 assert.ok(report.results.some(r => r.outcome?.exitCode === 0 && !r.error), 'No comparison produced a valid large archive');
+assert.ok(report.results.some(r => r.transport === 'injected-recovery' && r.outcome?.exitCode === 0 && !r.error), 'Plugin recovery must produce a valid large archive');

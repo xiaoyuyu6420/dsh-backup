@@ -168,7 +168,7 @@ v0.7.0 起每份备份附带 `.meta.json`（机器元数据）与 `.redacted.jso
 
 - **装错了包** —— 正确的包名是 `@xiaoyuyu6420/dsh-backup`（带前缀）。不带前缀的 `dsh-backup` 是无关的第三方包。检查 profile 的插件列表，用正确名字重装。
 - **插件加载失败，报 `client api: method "backupPanel/remove" conflicts with its namespace service`** —— 你装的是 v0.5.0 旧版（详见 [#2](https://github.com/xiaoyuyu6420/dsh-backup/issues/2)、[#5](https://github.com/xiaoyuyu6420/dsh-backup/issues/5)）。v0.5.1 已修复：执行 `dsh plugin --profile web add @xiaoyuyu6420/dsh-backup@latest` 升级，重启 `dsh web` 即可。
-- **Windows 上用哪个 `tar`？** 都行。系统自带 System32 里的 bsdtar，Git Bash 里是 GNU tar，校验功能在两种 shell 下都能正常工作。
+- **Windows 上用哪个 `tar`？** 正常情况下使用宿主从 PATH 找到的 tar。针对 [#138](https://github.com/xiaoyuyu6420/dsh-backup/issues/138) 报告的 MSYS tar 大备份访问冲突，备份进程以 `3221225477 / 0xC0000005` 退出时，会先等待进程树结束、删除未完成归档，再通过同一宿主服务用 `%SystemRoot%\System32\tar.exe` 重试一次。其他错误或用户取消不会触发重试。若仍失败，错误包含退出码、已写入字节数、程序路径和 stderr；这条恢复路径不代表底层 MSYS / 宿主崩溃根因已经确认。
 
 ## 开发
 
@@ -184,4 +184,5 @@ node scripts/smoke.mjs          # 宿主冒烟测试（真实临时目录 + 模�
 node scripts/smoke-settings.mjs # 设置解析与兼容性
 node scripts/smoke-client.mjs   # 客户端 bundle 冒烟（握手 / schema / 标签页注册 / SSR）
 node scripts/regression-review.mjs # 安全与恢复回归（含多进程锁、恶意归档与大文件校验）
+node --test scripts/backup-tar.test.mjs # Windows tar 访问冲突恢复、取消与诊断
 ```
