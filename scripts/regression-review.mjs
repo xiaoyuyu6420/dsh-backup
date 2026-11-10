@@ -145,6 +145,29 @@ await test('a destination equal to DSH_HOME fails instead of creating an empty b
   assert.match(result.summary, /不能等于 DSH_HOME/);
 });
 
+await test('a tar crash removes the partial backup without publishing sidecars or rotating good backups', async () => {
+  const t = await setup();
+  const previous = await t.panel.backup();
+  assert.equal(previous.ok, true, previous.summary);
+  const original = await fs.readFile(previous.path);
+  const spawn = t.mock.ctx.subprocess.spawn;
+  t.mock.ctx.subprocess.spawn = (spec) => {
+    const create = spec.argv.indexOf('-czf');
+    if (create < 0) return spawn(spec);
+    return {
+      done: fs.writeFile(path.join(spec.cwd, spec.argv[create + 1]), 'partial').then(() => ({ exitCode: 0xc0000005, signal: null })),
+      terminate() {},
+      waitForExit: async () => {},
+      collected: { stderr: { readFrom: () => ({ text: '' }) } },
+    };
+  };
+  await assert.rejects(t.panel.backup(1), /3221225477/);
+  const archives = (await fs.readdir(t.root)).filter(n => /^dsh-.*\.tar\.gz(?:\.|$)/.test(n));
+  assert.ok(archives.length > 0);
+  assert.ok(archives.every(n => n.startsWith(path.basename(previous.path))));
+  assert.deepEqual(await fs.readFile(previous.path), original);
+});
+
 await test('host and standalone rescue reject destructive replacement with an internal backup root', async () => {
   const t = await setup((t) => ({ destination: `${t.dsh}/backups` }));
   const b = await t.panel.backup();

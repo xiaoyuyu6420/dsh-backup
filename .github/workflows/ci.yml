@@ -61,3 +61,6 @@ jobs:
 
       - name: Security and recovery regression suite
         run: node scripts/regression-review.mjs
+
+      - name: Windows tar recovery unit tests
+        run: node --test scripts/backup-tar.test.mjs
