@@ -19,6 +19,7 @@ e2e 脚本的断言清单见 `scripts/e2e-host.mjs` 头注释；其中 **HTML �
 
 | dsh-backup | 宿主列车 | 状态 | 备注 |
 |---|---|---|---|
+| 0.14.4 | **0.2.2-rc.1**（Linux）；Windows subprocess **0.2.1-rc.3** | ✅ Linux 真机 e2e 71/71；Windows 大归档与恢复路径通过 | 发布 #141：Windows 访问冲突后通过宿主管理的 Node 启动器重试同一个 tar；修复字面量目录排除。Windows Server 2025 / Node 24.22.0 / GNU tar 1.35：3308 MiB、54000 个小文件，五种启动方式均通过；另验证 Unicode、排除规则、恢复校验及取消孙进程。原报告的 Windows 11 崩溃未复现，不能据此认定现场问题已彻底解决；完整 Windows TUI、macOS 和人工面板抽检不在本轮覆盖内。 |
 | 0.14.3 | **0.2.2-rc.1**（2026-11-09 npm latest） | ✅ 真机 e2e 71/71（Linux） | 发布 #139 的安全与恢复修复；内部备份目录排除、同一安装解析宿主与解码器。smoke 596 / settings 47 / client 62 / review regressions 26。0.2.1-rc.5 在同一运行时代码的 #139 中已验证 71/71；本轮未复测 Windows/macOS，人工面板抽检仍待执行。 |
 | 0.14.2 | 0.2.1-rc.2(同 0.14.0) | ✅ 真机 e2e 70/70 | 复核修复版：加密/解密改分块流式 + 写临时文件后原子 rename；补 setGithubToken descriptor + 反向断言；redactSyncChannel 补花括号；文案/守门/测试钩子收口。smoke 596 / settings 47 / client 62 / e2e 70。 |
 | 0.14.1 | 0.2.1-rc.2(同 0.14.0) | ✅ 真机 e2e 70/70 | 补发:npm 上的 0.14.0 先于 Codex 支持发布(tag 触发 publish workflow),0.14.1 把 Codex 聊天记录导入同步到 npm 轨道;smoke 596 / settings 47 / client 62 / e2e 70。代码面与仓库 tag v0.14.0 一致。 |
