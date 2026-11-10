@@ -1,0 +1,37 @@
+name: Windows large backup
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-backup-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+      - name: Install the reported host subprocess and MSYS tar
+        shell: pwsh
+        run: |
+          $deps = Join-Path $env:RUNNER_TEMP 'backup-138-deps'
+          npm install --prefix $deps --ignore-scripts --no-audit --no-fund @deepseek-ai/dsh-subprocess-local@0.2.1-rc.3 @deepseek-ai/cordis@4.0.5 @dsh-ops/bash-win32-x64@0.2.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "BACKUP_PROBE_DEPS=$deps" >> $env:GITHUB_ENV
+          "BACKUP_PROBE_REPORT=$(Join-Path $env:RUNNER_TEMP 'backup-138-report.json')" >> $env:GITHUB_ENV
+      - name: Compare 3308 MiB and 54000 files with the real Windows host runner
+        run: node scripts/windows-backup-probe.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-backup-comparison
+          path: ${{ runner.temp }}/backup-138-report.json
+          if-no-files-found: warn
