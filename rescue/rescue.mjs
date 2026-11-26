@@ -31,6 +31,8 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as zlib from 'node:zlib';
+import { open as openSessionFile } from 'node:fs/promises';
+import { StringDecoder } from 'node:string_decoder';
 
 const IS_WIN = process.platform === 'win32';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -232,79 +234,160 @@ function snippet(text, max = 60) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+// BEGIN BOUNDED SESSION READER
+// Mirrored into standalone rescue.mjs; regression-doctor.mjs checks exact parity.
+const SESSION_LIMITS = Object.freeze({ input: 64 * 1024 * 1024, decoded: 64 * 1024 * 1024,
+  frame: 16 * 1024 * 1024, line: 8 * 1024 * 1024, lines: 200000, frames: 200000 });
+class SessionLimitError extends Error {
+  constructor(limit) { super(`会话校验达到资源上限（${limit}），未验证；不代表文件损坏`); this.code = 'SESSION_VALIDATION_LIMIT'; }
+}
+class SessionCorruptError extends Error {}
+
+// Bound the read itself, including a file growing after stat; never readFile then check.
+async function readSessionBytes(file) {
+  const handle = await openSessionFile(file, 'r');
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) throw new Error('不是普通会话文件，未验证');
+    if (before.size > SESSION_LIMITS.input) throw new SessionLimitError('输入字节数');
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const chunk = Buffer.alloc(Math.min(65536, SESSION_LIMITS.input + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (!bytesRead) break;
+      total += bytesRead;
+      if (total > SESSION_LIMITS.input) throw new SessionLimitError('输入字节数');
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+    const after = await handle.stat();
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs)
+      throw new Error('读取时会话发生变化，未验证');
+    return Buffer.concat(chunks, total);
+  } finally { await handle.close(); }
+}
+
+function sessionLineCollector() {
+  const decoder = new StringDecoder('utf8');
+  const lines = [];
+  let pending = '', decoded = 0;
+  function consume(text) {
+    let start = 0, end;
+    while ((end = text.indexOf('\n', start)) !== -1) {
+      pending += text.slice(start, end);
+      if (Buffer.byteLength(pending) > SESSION_LIMITS.line) throw new SessionLimitError('单行字节数');
+      if (pending.length) {
+        if (lines.length >= SESSION_LIMITS.lines) throw new SessionLimitError('逻辑行数');
+        lines.push(pending);
+      }
+      pending = ''; start = end + 1;
+    }
+    pending += text.slice(start);
+    if (Buffer.byteLength(pending) > SESSION_LIMITS.line) throw new SessionLimitError('单行字节数');
+  }
+  return {
+    remaining: () => SESSION_LIMITS.decoded - decoded,
+    push(out) {
+      decoded += out.length;
+      if (decoded > SESSION_LIMITS.decoded) throw new SessionLimitError('解压总字节数');
+      consume(decoder.write(out));
+    },
+    finish() { consume(decoder.end() + '\n'); return lines; },
+  };
+}
+
+function decompressSessionFrame(buf, maxOutputLength = SESSION_LIMITS.frame) {
+  try {
+    return zlib.zstdDecompressSync(buf, { maxOutputLength,
+      params: { [zlib.constants.ZSTD_d_windowLogMax]: 26 } });
+  } catch (err) {
+    if (err.code === 'ERR_BUFFER_TOO_LARGE' || err.code === 'ZSTD_error_frameParameter_windowTooLarge')
+      throw new SessionLimitError('单帧/解压总字节数或解码窗口');
+    // Only proven format/decompression defects are corruption. Capability, allocation,
+    // I/O and unexpected runtime errors must never authorize destructive repair.
+    if (['ZSTD_error_prefix_unknown', 'ZSTD_error_corruption_detected', 'ZSTD_error_checksum_wrong',
+      'ZSTD_error_srcSize_wrong', 'ZSTD_error_literals_headerWrong'].includes(err.code))
+      throw new SessionCorruptError(err.message);
+    throw err;
+  }
+}
+
 function walkZstdFrames(buf) {
+  if (buf.length > SESSION_LIMITS.input) throw new SessionLimitError('输入字节数');
   const frames = [];
   let off = 0;
   while (off < buf.length) {
-    if (buf.length - off < 4) throw new Error(`尾部截断（余 ${buf.length - off} 字节不成帧）`);
+    if (frames.length >= SESSION_LIMITS.frames) throw new SessionLimitError('帧数');
+    if (buf.length - off < 4) throw new SessionCorruptError(`尾部截断（余 ${buf.length - off} 字节不成帧）`);
     const magic = buf.readUInt32LE(off);
     if (magic === ZSTD_MAGIC) {
       let pos = off + 4;
-      if (pos >= buf.length) throw new Error('帧头描述符缺失');
+      if (pos >= buf.length) throw new SessionCorruptError('帧头描述符缺失');
       const desc = buf[pos++];
-      if (desc & 0x08) throw new Error('帧头保留位置位');
+      if (desc & 0x08) throw new SessionCorruptError('帧头保留位置位');
       const singleSegment = Boolean(desc & 0x20);
       const checksum = Boolean(desc & 0x04);
       const dictSize = [0, 1, 2, 4][desc & 0x03];
       const fcsSize = singleSegment ? [1, 2, 4, 8][desc >> 6] : [0, 2, 4, 8][desc >> 6];
-      if (!singleSegment) pos += 1;
+      if (!singleSegment) pos += 1; // Window_Descriptor
       pos += dictSize + fcsSize;
-      if (pos > buf.length) throw new Error('帧头越界');
+      if (pos > buf.length) throw new SessionCorruptError('帧头越界');
       let last = false;
       while (!last) {
-        if (buf.length - pos < 3) throw new Error('块头截断');
+        if (buf.length - pos < 3) throw new SessionCorruptError('块头截断');
         const bh = buf.readUIntLE(pos, 3);
         last = Boolean(bh & 0x01);
         const btype = (bh >> 1) & 0x03;
         const bsize = bh >> 3;
-        if (btype === 3) throw new Error('保留块类型');
+        if (btype === 3) throw new SessionCorruptError('保留块类型');
+        // Raw/Compressed 块占 bsize 字节；RLE 块只占 1 字节
         pos += 3 + (btype === 1 ? 1 : bsize);
-        if (pos > buf.length) throw new Error('块数据越界');
+        if (pos > buf.length) throw new SessionCorruptError('块数据越界');
       }
       if (checksum) {
-        if (buf.length - pos < 4) throw new Error('帧校验和截断');
+        if (buf.length - pos < 4) throw new SessionCorruptError('帧校验和截断');
         pos += 4;
       }
       frames.push([off, pos]);
       off = pos;
     } else if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
-      // 宿主 scanZstdFrames 拒绝一切非数据帧魔数——容忍 skippable 会造成
-      // 「doctor 报 OK、宿主整体拒载」（#66，与 lib/index.js 同步）
-      throw new Error('遇 skippable 帧——宿主读端不支持任何非数据帧魔数，整个文件将被拒载');
+      throw new SessionCorruptError('遇 skippable 帧——宿主读端不支持任何非数据帧魔数，整个文件将被拒载');
     } else {
-      throw new Error(`偏移 ${off} 处不是 zstd 帧魔数`);
+      throw new SessionCorruptError(`偏移 ${off} 处不是 zstd 帧魔数`);
     }
   }
   return frames;
 }
 
-/**
- * 解出 .zstd 会话日志的全部逻辑行；任一帧损坏即抛错。同时对首个数据帧做
- * 宿主容器契约判定 headerFrameOk——宿主 assertZstdHeaderFrame 是字节精确的：
- * 首帧解出必须非空、且首个换行符恰在最后一个字节（「恰好一行、单个 \n 结尾」）。
- * 行流拼接校验覆盖不到这条（#66，与 lib/index.js 同步）。
- */
-function decodeZstdLog(buf) {
-  const parts = [];
-  let frameNo = 0;
+// Migration/rewind callers historically inspect logical lines without enforcing the
+// current container contract. Doctor opts into it; resource bounds apply to all callers.
+function decodeZstdLog(buf, { checkHeaderFrame = false, checkHeader } = {}) {
+  const collector = sessionLineCollector();
   let headerFrameOk;
   for (const [s, e] of walkZstdFrames(buf)) {
-    frameNo += 1;
-    try {
-      const out = zlib.zstdDecompressSync(buf.subarray(s, e));
-      parts.push(out);
-      if (headerFrameOk === undefined) {
-        headerFrameOk = out.length > 0 && out.indexOf(10) === out.length - 1;
-      }
-    } catch (err) {
-      throw new Error(`第 ${frameNo} 帧解压失败：${String(err && err.message ? err.message : err)}`);
+    if (!collector.remaining()) throw new SessionLimitError('解压总字节数');
+    const out = decompressSessionFrame(buf.subarray(s, e), Math.min(SESSION_LIMITS.frame, collector.remaining()));
+    if (headerFrameOk === undefined) {
+      headerFrameOk = out.length > 0 && out.indexOf(10) === out.length - 1;
+      if (checkHeaderFrame && !headerFrameOk) throw new SessionCorruptError('首帧不是恰好一行 header——违反容器契约');
+    }
+    collector.push(out);
+    if (checkHeader && headerFrameOk !== undefined) {
+      const defect = checkHeader(out.toString('utf8').replace(/\n$/, ''));
+      if (defect) throw new SessionCorruptError(defect);
+      checkHeader = undefined;
     }
   }
-  return {
-    lines: Buffer.concat(parts).toString('utf8').split('\n').filter((l) => l.length > 0),
-    headerFrameOk,
-  };
+  return { lines: collector.finish(), headerFrameOk };
 }
+
+function decodePlainLog(buf) {
+  const collector = sessionLineCollector();
+  // Also limit temporary strings for uncompressed logs.
+  for (let off = 0; off < buf.length; off += 65536) collector.push(buf.subarray(off, off + 65536));
+  return collector.finish();
+}
+// END BOUNDED SESSION READER
 
 function validateSessionLines(lines) {
   let header;
@@ -350,20 +433,21 @@ function validateSessionLines(lines) {
   return null;
 }
 
-async function collectSessionLogs(dir, relPrefix, depth, out) {
-  if (depth > SCAN_MAX_DEPTH || out.length >= SCAN_MAX_FILES) return;
+async function collectSessionLogs(dir, relPrefix, depth, out, coverage = {}) {
+  if (depth > SCAN_MAX_DEPTH || out.length >= SCAN_MAX_FILES) { coverage.incomplete = true; return; }
   let dirents;
   try {
     dirents = await fs.readdir(dir, { withFileTypes: true });
   } catch {
+    coverage.incomplete = true;
     return;
   }
   for (const d of dirents) {
-    if (out.length >= SCAN_MAX_FILES) return;
+    if (out.length >= SCAN_MAX_FILES) { coverage.incomplete = true; return; }
     const rel = relPrefix ? `${relPrefix}/${d.name}` : d.name;
     if (d.isDirectory()) {
       if (SCAN_SKIP_DIRS.has(d.name)) continue;
-      await collectSessionLogs(`${dir}/${d.name}`, rel, depth + 1, out);
+      await collectSessionLogs(`${dir}/${d.name}`, rel, depth + 1, out, coverage);
     } else if (isSessionLogName(d.name)) {
       out.push({ abs: `${dir}/${d.name}`, rel });
     }
@@ -377,46 +461,49 @@ async function validateSessionFile(f) {
     if (f.abs.endsWith('.zstd') && !HAS_NODE_ZSTD) {
       return { state: 'skipped', reason: `运行时 Node（${process.version}）无内置 zstd 解码，跳过深度校验` };
     }
-    if (info.size > HASH_MAX_BYTES) {
+    if (info.size > SESSION_LIMITS.input) {
       return { state: 'skipped', reason: `文件 ${Math.floor(info.size / 1048576)}MB 超过深度校验上限` };
     }
     let lines;
     let headerFrameOk;
     if (f.abs.endsWith('.zstd')) {
-      ({ lines, headerFrameOk } = decodeZstdLog(await fs.readFile(f.abs)));
+      ({ lines, headerFrameOk } = decodeZstdLog(await readSessionBytes(f.abs), { checkHeaderFrame: true, checkHeader: (line) => validateSessionLines([line]) }));
       // 容器契约（#66/#1047）：首帧必须解出「恰好一行 header、单个换行结尾」
       if (headerFrameOk === false) {
         return { state: 'bad', reason: '首帧不是恰好一行 header——违反容器契约（首帧应解出一行 SessionHeader 且以单个换行结尾；单帧重写/多余空行/缺行尾的典型形态，宿主读端会拒载）' };
       }
     } else {
-      lines = (await fs.readFile(f.abs, 'utf8')).split('\n').filter((l) => l.length > 0);
+      lines = decodePlainLog(await readSessionBytes(f.abs));
     }
     if (!lines.length) return { state: 'bad', reason: '解出的逻辑行为空' };
     const defect = validateSessionLines(lines);
     return defect === null ? { state: 'ok' } : { state: 'bad', reason: defect };
   } catch (err) {
-    return { state: 'bad', reason: String(err && err.message ? err.message : err) };
+    return { state: err instanceof SessionCorruptError ? 'bad' : 'skipped', reason: String(err && err.message ? err.message : err) };
   }
 }
 
 async function runDoctorScan(dshHome) {
   const found = [];
-  await collectSessionLogs(dshHome, '', 0, found);
+  const coverage = {};
+  await collectSessionLogs(dshHome, '', 0, found, coverage);
   const files = [];
   for (const f of found) {
     const verdict = await validateSessionFile(f);
     files.push({ rel: f.rel, ok: verdict.state === 'ok', skipped: verdict.state === 'skipped', reason: verdict.reason });
   }
   const corrupt = files.filter((x) => !x.ok && !x.skipped);
-  return { scanned: files.length, files, corrupt, corruptCount: corrupt.length, skippedCount: files.filter((x) => x.skipped).length };
+  return { incomplete: Boolean(coverage.incomplete), scanned: files.length, files, corrupt, corruptCount: corrupt.length, skippedCount: files.filter((x) => x.skipped).length };
 }
 
 function summarizeDoctorScan(r) {
-  if (!r.files.length) return '未找到任何会话日志。';
+  if (!r.files.length) return r.incomplete ? '⚠️ 会话扫描未完成，不能确认健康状态。' : '未找到任何会话日志。';
   const healthy = r.scanned - r.corruptCount - r.skippedCount;
   let head = `扫描 ${r.scanned} 个会话日志：${healthy} 健康、${r.corruptCount} 损坏`;
+  if (r.incomplete) head += '（扫描未覆盖全部目录/文件）';
   if (r.skippedCount) head += `、${r.skippedCount} 个未能深度校验`;
-  if (!r.corruptCount) return `✅ ${head}`;
+  if (r.skippedCount) head += '\n' + r.files.filter((f) => f.skipped).slice(0, 15).map((f) => `  ⚠️ ${f.rel}: ${f.reason}`).join('\n');
+  if (!r.corruptCount) return `${r.skippedCount || r.incomplete ? '⚠️' : '✅'} ${head}`;
   const shown = r.corrupt.slice(0, 15);
   const more = r.corrupt.length > shown.length ? `\n  …另有 ${r.corrupt.length - shown.length} 个` : '';
   return `${head}\n${shown.map((c) => `  ❌ ${c.rel}\n     ${c.reason}`).join('\n')}${more}`;
@@ -465,13 +552,16 @@ async function doctorRepair(root, dshHome, selector) {
     throw new Error(`定点修复失败（${reason}），且部分现场未自动还原: ${missing.join(', ')}；*.corrupt-${stamp} 留档在原目录旁，可手工拷回`);
   }
   const stillBad = [];
+  const unverified = [];
   for (const t of targets) {
     const verdict = await validateSessionFile({ abs: `${dshHome}/${t.rel}`, rel: t.rel });
+    if (verdict.state === 'skipped') unverified.push(t.rel);
     if (verdict.state === 'bad') stillBad.push(`${t.rel}（${verdict.reason}）`);
   }
-  const lines = [`🩹 定点修复完成（来源: ${picked.name}）`, `  已恢复 ${targets.length} 个文件${stillBad.length ? '' : '，复检全部健康'}`];
+  const lines = [`🩹 定点修复完成（来源: ${picked.name}）`, `  已恢复 ${targets.length} 个文件${stillBad.length || unverified.length ? '' : '，复检全部健康'}`];
   for (const k of kept) lines.push(`  损坏现场已留档: ${k}`);
   if (unrecoverable.length) lines.push(`  ⚠️ 归档中无对应副本: ${unrecoverable.join(', ')}（改用 restore 全量恢复）`);
+  if (unverified.length) lines.push(`  ⚠️ 恢复后未验证（不代表损坏）: ${unverified.join(', ')}`);
   if (stillBad.length) lines.push(`  ❌ 修复后复检仍异常: ${stillBad.join('; ')}`);
   return { repaired: targets.map((t) => t.rel), unrecoverable, stillBad, summary: lines.join('\n') };
 }
@@ -494,6 +584,8 @@ async function restoreArchive(root, selector, apply) {
   }
   const home = userHome();
   const preflight = [];
+  if (meta?.validation?.unverified?.length || meta?.validation?.scanIncomplete) preflight.push('⚠️ 此归档的会话未全部验证，不代表损坏，恢复后需在宿主确认可加载');
+  if (meta?.quarantined?.length) preflight.push(`⚠️ 归档不完整：备份时隔离了 ${meta.quarantined.length} 个损坏会话文件（未入档）`);
   if (meta && typeof meta.home === 'string' && home && meta.home !== home) {
     preflight.push(`⚠️ 备份来自另一台机器/用户目录（${meta.host ?? '未知'}，${meta.home}），settings 内的绝对路径可能需要调整`);
   }
@@ -871,9 +963,9 @@ async function sessionsRepair(root, dshHome, argv) {
     let lines = null;
     try {
       if (f.abs.endsWith('.zstd')) {
-        ({ lines } = decodeZstdLog(await fs.readFile(f.abs)));
+        ({ lines } = decodeZstdLog(await readSessionBytes(f.abs)));
       } else {
-        lines = (await fs.readFile(f.abs, 'utf8')).split('\n').filter((l) => l.length > 0);
+        lines = decodePlainLog(await readSessionBytes(f.abs));
       }
       if (lines && lines.length) header = JSON.parse(lines[0]);
     } catch { header = null; }
@@ -921,7 +1013,7 @@ async function sessionsRepair(root, dshHome, argv) {
       const newHeaderLine = JSON.stringify({ ...JSON.parse(p.lines[0]), cwd: p.newCwd });
       let outBuf;
       if (p.file.abs.endsWith('.zstd')) {
-        const raw = await fs.readFile(p.file.abs);
+        const raw = await readSessionBytes(p.file.abs);
         const frames = walkZstdFrames(raw);
         if (!frames.length) throw new Error('无 zstd 帧');
         const newHead = zlib.zstdCompressSync(`${newHeaderLine}\n`);

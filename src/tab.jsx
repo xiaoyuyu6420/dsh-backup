@@ -755,6 +755,8 @@ export function BackupTab({ panel, t }) {
             <p className="dsb-banner" role="status" data-ok={banner.ok ? 'true' : 'false'}>{banner.text}</p>
           ) : null}
 
+          {snap.autoNotice && <div className="dsb-warn" role="status">{snap.autoNotice}</div>}
+
           {tab === 'backup' ? (
             <>
               {snap.backups.length === 0 ? (

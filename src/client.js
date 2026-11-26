@@ -29,6 +29,7 @@ const statusSchema = z.object({
   keepDefault: z.number().int(),
   autoHours: z.number().int(),
   lastAuto: z.string().nullable(),
+  autoNotice: z.string().optional(),
   backups: z.array(z.object({
     name: z.string(),
     size: z.number().int().nullable(),

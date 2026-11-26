@@ -1,0 +1,23 @@
+# #143: bounded session validation
+
+The 0.14.4 Doctor checked the compressed file size, then decompressed every frame and joined the entire log into one string. A resource-limit exception became `bad`, authorizing quarantine and Doctor repair. Automatic backups discarded the skipped-file result and logged clean completion even if corruption had made the archive incomplete.
+
+This change distinguishes proven format defects from incomplete validation. A resource limit, unavailable codec, read failure, or file changing during the bounded read produces `skipped` (unverified), never a repair candidate. Unknown decoder errors are also unverified. Malformed containers, proven decompression/checksum errors, invalid headers, JSON errors and sequence defects still produce corruption when validation reaches them. An unverified file is not a claim that all its bytes are healthy.
+
+Per-file validation budgets are 64 MiB input, 64 MiB cumulative decoded output, 16 MiB per decoded frame, 8 MiB per logical line, and 200,000 frames/lines. The native decoder window is capped at 64 MiB. These are work/memory limits, not maximum supported backup sizes or a promise about total process RSS. Reads themselves are bounded, UTF-8 state spans frames, and the full decoded log is never concatenated into a single string. Files beyond a budget are not excluded by Doctor and are archived as original bytes within the selected backup types and configured exclusions. This intentionally permits backups of much larger sessions without deeply validating them.
+
+Backup results and `.meta.json` now retain `archiveStatus` (`complete`, `unverified`, `incomplete`) and `validation` (`unverified` file reasons, `scanIncomplete`). Here `complete` means no Doctor warning within its existing format checks, not a proof that a host can load every future event type. True corruption still excludes files and pauses rotation. File validation limits alone do neither. A failed/truncated directory scan still pauses rotation to protect unseen healthy copies. Explicit pre-restore snapshots that skip scanning remain unverified.
+
+Automatic backups distinguish an archive produced with warnings from a fatal backup failure. Warnings persist separately as `lastAutoWarning`, survive restart, appear in command/panel status, and do not trigger failure retry backoff. A later clean success clears warnings. Restore previews and post-repair rechecks disclose unverified content. Standalone rescue embeds the same bounded reader to remain a single portable file; the regression checks exact reader parity. Migration and rewind share the limits without silently adopting Doctor's stricter container-header contract.
+
+## Verification
+
+All fixtures are synthetic and temporary. No reporter sessions, real backups or user configuration are read or changed.
+
+- `node scripts/regression-doctor.mjs`: tiny compressed multi-frame fixture exceeding the total decoded budget, oversized frame/line/input/count bounds, split UTF-8, corruption, actual command/tool/panel entry points, tar bytes, rotation, repair, copied standalone rescue, migration, rewind, restore preview, auto timer outcomes, persistent status and scan coverage.
+- `node scripts/smoke.mjs`, `smoke-settings.mjs`, `smoke-client.mjs`, `regression-review.mjs`, and `node --test scripts/backup-tar.test.mjs`: existing behavior, including migration and restored/imported/rewound sessions. Client schema retains the automatic warning; the generated client is rebuilt.
+- `DSH_E2E_HOST_ROOT=<isolated installation> node scripts/e2e-host.mjs`: real Linux DSH 0.2.2-rc.5, boot/settings/RPC/backup/restore and host decoding of imported/rewound sessions. Added RPC checks for the bounded fixture, exact archived bytes, no retention pause and no repair candidate.
+
+Local runtime matrix: Node 20.20.2 (no built-in zstd; plain-log limits and codec degradation), 22.23.5 and 24.19.0 (native zstd). The new regression is included in the existing Node 20/22 CI workflow. No Windows environment or reporter's original file was used, and no browser interaction was manually exercised. Windows execution and the remote PR CI remain release gates; no push or release is authorized in this task.
+
+Final local results: Node 24 smoke 596/596; Node 20 smoke 529/529; bounded regressions Node 20 23/23 and Node 22/24 29/29; settings 47/47; client 63/63; prior review regressions 27/27; tar recovery unit tests 18/18; real host 75/75. `npm pack` contains 18 files including the new reader; the packed reader, host entry, client bundle and rescue script match source bytes. Package version remains 0.14.4 for this unreleased local change.
