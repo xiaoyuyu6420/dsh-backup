@@ -16,8 +16,10 @@ function check(name, fn) { fn(); checks++; console.log(`PASS ${name}`); }
 const exists = (p) => fs.stat(p).then(() => true, () => false);
 const t = await mkTmpHome();
 try {
-  const lib = await fs.readFile(new URL('../lib/session-log.js', import.meta.url), 'utf8');
-  const rescue = await fs.readFile(new URL('../rescue/rescue.mjs', import.meta.url), 'utf8');
+  // Git may check out text as CRLF on Windows; compare source after normalizing EOLs.
+  const sourceText = async (rel) => (await fs.readFile(new URL(rel, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const lib = await sourceText('../lib/session-log.js');
+  const rescue = await sourceText('../rescue/rescue.mjs');
   check('standalone rescue reader stays identical to shared reader', () => assert.equal(
     rescue.split('// BEGIN BOUNDED SESSION READER\n')[1].split('// END BOUNDED SESSION READER')[0],
     lib.slice(lib.indexOf('// Mirrored'), lib.indexOf('\nexport {'))));
