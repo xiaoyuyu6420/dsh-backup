@@ -145,7 +145,7 @@ async function main() {
   const samples = {
     'backupPanel/status': {
       destination: 'C:/Users/u/Desktop/DSH Backups', dshHome: 'C:/Users/u/.dsh',
-      keepDefault: 7, autoHours: 3, lastAuto: null,
+      keepDefault: 7, autoHours: 3, lastAuto: null, autoNotice: '上次自动备份已生成归档，但会话未全部验证',
       backups: [{ name: 'dsh-20260815-095739228.tar.gz', size: 12345 }, { name: 'dsh-x.tar.gz', size: null }],
     },
     'backupPanel/backup': { ok: true, summary: '备份完成', path: '/x/dsh-1.tar.gz', sha: 'ab'.repeat(32), stale: 1, keep: 7 },
@@ -201,6 +201,8 @@ async function main() {
       ok(false, `${key} 结果 schema 解析失败: ${String(err)}`);
     }
   }
+  const statusResult = contribution.descriptors.find((d) => d.method === 'status').result.schema.parse(samples['backupPanel/status']);
+  ok(statusResult.autoNotice === samples['backupPanel/status'].autoNotice, '自动备份警告穿过客户端 schema，不被静默丢弃');
   ok(contribution.descriptors.every((d) => d.parameters.every((p) => p.codec.mode === 'strict' && p.codec.schema)), '参数全部 strict codec（客户端挂载校验要求）');
   {
     // 反向断言：面板上调用的每个方法都必须在 descriptors 里（#97 的镜像面，

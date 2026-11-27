@@ -607,6 +607,24 @@ async function main() {
     const rescanQ = await rpc('doctorScan');
     check('修复后复扫全绿', rescanQ?.ok === true && rescanQ?.corruptCount === 0, JSON.stringify(rescanQ).slice(0, 120));
 
+    // #143: a tiny compressed fixture exceeds the decoded budget in the real host.
+    const limitDir = path.join(home, 'sessions', '--e2e-limit--');
+    fs.mkdirSync(limitDir, { recursive: true });
+    const limitFile = path.join(limitDir, 'session.v4.jsonl.zstd');
+    const limitHeader = zstdCompressSync(Buffer.from(JSON.stringify({ type: 'session', version: 4, id: 'limit-143', createdAt: 0, delegationDepth: 0 }) + '\n'));
+    const limitFrame = zstdCompressSync(Buffer.from(JSON.stringify({ type: 'future', data: 'x'.repeat(1024 * 1024) }) + '\n'));
+    const limitBytes = Buffer.concat([limitHeader, ...Array(65).fill(limitFrame)]);
+    fs.writeFileSync(limitFile, limitBytes);
+    const limitScan = await rpc('doctorScan');
+    check('真实宿主 Doctor 将解压超限标为未验证', limitScan?.corruptCount === 0 && limitScan?.skippedCount === 1, JSON.stringify(limitScan).slice(0, 180));
+    const limitBackup = await rpc('backup');
+    check('真实宿主超限备份仍完成且不暂停轮换', limitBackup?.ok === true && limitBackup?.archiveStatus === 'unverified' && limitBackup?.retentionPaused === false, JSON.stringify(limitBackup).slice(0, 180));
+    const limitTar = spawnSync('tar', ['-xOzf', limitBackup.path, `${path.basename(home)}/sessions/--e2e-limit--/session.v4.jsonl.zstd`]);
+    check('真实宿主归档保留超限会话原始字节', limitTar.status === 0 && limitTar.stdout.equals(limitBytes));
+    const limitRepair = await rpc('doctorRepair', { selector: 'latest' });
+    check('真实宿主 Doctor 不修复未验证日志', limitRepair?.repaired?.length === 0 && fs.readFileSync(limitFile).equals(limitBytes), JSON.stringify(limitRepair).slice(0, 180));
+    fs.rmSync(limitDir, { recursive: true });
+
     // ---------- #119：清单超过 collect spill 上限的大归档（真宿主） ----------
     // 宿主 collect 的 spill 有上限，超限即**丢弃 spill 文件**、只留 8 KB 内存尾窗——
     // 校验器若把尾窗当清单，会把"断在文件名中间的碎片"判成不安全条目、拒绝整包
