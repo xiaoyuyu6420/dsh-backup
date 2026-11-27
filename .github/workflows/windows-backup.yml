@@ -39,3 +39,18 @@ jobs:
           name: windows-backup-comparison
           path: ${{ runner.temp }}/backup-138-report.json
           if-no-files-found: warn
+
+  doctor:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.0
+      - name: Install pnpm
+        run: npm i -g pnpm@11.24.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Bounded Doctor, archive, rotation and automatic status regressions
+        run: node scripts/regression-doctor.mjs

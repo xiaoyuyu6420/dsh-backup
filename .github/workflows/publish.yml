@@ -43,6 +43,12 @@ jobs:
       - name: Security and recovery regression suite
         run: node scripts/regression-review.mjs
 
+      - name: Bounded Doctor and backup regressions
+        run: node scripts/regression-doctor.mjs
+
+      - name: Windows tar recovery unit tests
+        run: node --test scripts/backup-tar.test.mjs
+
       - name: Publish to npm
         run: npm publish --access public
         env:
